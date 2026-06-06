@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: node ${{ matrix.node }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test:run
+
+      - name: CLI smoke (built binary)
+        run: node dist/bin/vibe.js --version
+
+      # Guard the published tarball: nothing outside the `files` whitelist may ship.
+      - name: Tarball content guard
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: |
+          npm pack --dry-run --json > pack.json
+          node -e "
+            const files = require('./pack.json')[0].files.map(f => f.path);
+            const banned = files.filter(p =>
+              p.startsWith('DEV-DOCS/') || p.startsWith('tests/') ||
+              p.startsWith('docs/') || p.startsWith('test-artifacts/') ||
+              p.startsWith('.env'));
+            if (banned.length) { console.error('Banned paths in tarball:', banned); process.exit(1); }
+            console.log('Tarball clean:', files.length, 'files');
+          "

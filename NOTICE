@@ -1,0 +1,19 @@
+JBS Vibe Editing
+Copyright 2026 Julian Bent Singh
+
+Free for non-commercial use under the PolyForm Noncommercial License 1.0.0.
+Commercial use requires a separate license — see README.
+
+This project is independent and is not affiliated with, sponsored by, or endorsed by
+Anthropic PBC, OpenAI, Google, ElevenLabs, Runway AI, fal.ai, ByteDance, or Remotion.
+"Claude" and "Claude Code" are trademarks of Anthropic PBC; "Codex" of OpenAI; "Gemini" of
+Google LLC — used only descriptively to identify external tools this project integrates with.
+Remotion is licensed separately by Remotion AG; company use of Remotion may require a paid
+Remotion license (remotion.dev/license).
+FFmpeg is a trademark of Fabrice Bellard. JBS Vibe Editing does not bundle FFmpeg; it can
+download an FFmpeg build to your machine at your request (GPL/LGPL — sources available from
+the respective build providers).
+Style names (e.g. "Hormozi", "MKBHD", "Ali Abdaal", "Apple keynote") are descriptive
+shorthand for visual styles and imply no affiliation or endorsement.
+Users are responsible for the rights to media they import, download (yt-dlp), or generate,
+and for complying with the terms of the API providers whose keys they configure.

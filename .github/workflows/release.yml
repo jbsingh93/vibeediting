@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write # npm OIDC trusted publishing — no NPM_TOKEN secret
+      contents: write # changesets opens/updates the release PR
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Node 24: npm CLI >= 11.5.1 is required for OIDC trusted publishing
+      # (Node 22 ships npm 10, which fails with E404).
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Create release PR or publish
+        uses: changesets/action@v1
+        with:
+          publish: npm run changeset:publish
+          version: npm run changeset:version
+          commit: 'chore: release'
+          title: 'chore: release'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

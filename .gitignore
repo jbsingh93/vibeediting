@@ -1,0 +1,28 @@
+# --- internal build contract: NEVER published, NEVER pushed (doc-of-record lives locally) ---
+DEV-DOCS/
+
+# --- node / build ---
+node_modules/
+dist/
+*.log
+*.tsbuildinfo
+
+# NOTE: ui-dist/ is intentionally NOT ignored — the prebuilt UI client is
+# committed and shipped in the npm package (aabclitool pattern).
+
+# --- env & secrets ---
+.env
+.env.local
+
+# --- test & coverage artifacts ---
+coverage/
+.vitest-cache/
+test-artifacts/
+test-results/
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
+
+# --- scratch output ---
+out/
