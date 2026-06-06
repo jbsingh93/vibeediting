@@ -14,6 +14,11 @@ dist/
 .env
 .env.local
 
+# --- generated machine-specific artifacts (suite/probe writes; must never ship in template) ---
+template/capabilities/_env/ffmpeg-capabilities.json
+template/.vibe/
+template/out/
+
 # --- test & coverage artifacts ---
 coverage/
 .vitest-cache/

@@ -1,16 +1,18 @@
 import * as fs from 'node:fs';
 import { test, assert, assertEqual } from './harness';
-import { resolveFfmpeg, probeCapabilities, runSelfTest } from '../_env/ffmpeg';
+import { resolveFfmpeg, writeCapabilities, runSelfTest } from '../_env/ffmpeg';
 
-test('P0.1 resolver finds the full ffmpeg build (not bare PATH)', () => {
+test('P0.1 resolver finds a real ffmpeg build (not bare PATH)', () => {
   const r = resolveFfmpeg();
-  assert(r.ffmpeg !== 'ffmpeg', 'resolver fell back to bare PATH — the full C:\\ffmpeg\\bin build was not found');
+  assert(r.ffmpeg !== 'ffmpeg', 'resolver fell back to bare PATH — no resolvable build found (run `vibe setup --ffmpeg`)');
   assert(fs.existsSync(r.ffmpeg), `resolved ffmpeg does not exist: ${r.ffmpeg}`);
   assert(fs.existsSync(r.ffprobe), `resolved ffprobe does not exist: ${r.ffprobe}`);
 });
 
 test('P0.1 build has every required filter + encoder (GAP-23/41)', () => {
-  const caps = probeCapabilities();
+  // writeCapabilities = probe + persist _env/ffmpeg-capabilities.json — keeps the generated
+  // snapshot fresh on every suite run (the template never ships one; it is machine-specific).
+  const caps = writeCapabilities();
   assertEqual(caps.missing.length, 0, `missing capabilities: ${caps.missing.join(', ')}`);
 });
 
