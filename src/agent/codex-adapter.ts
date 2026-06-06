@@ -26,7 +26,6 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import { captureCommand, findOnPath, launchSpec, resolveCmdShimToExe } from '../core/proc.js';
 import { classifyTool, type AgentEvent } from './events.js';
 import { appendChat, readSessionId, saveSessionId, shouldPersistEvent } from './chat.js';
@@ -92,8 +91,10 @@ export function eventsFromCodexLine(evt: CodexLine, lastText: { value: string })
           glyph: cls.glyph,
         });
       } else if (item.type === 'file_change') {
+        // Separator-agnostic basename: codex emits OS-native paths (backslashes on Windows),
+        // and node's path.basename only splits the CURRENT platform's separator.
         const files = (item.changes ?? [])
-          .map((c) => (typeof c.path === 'string' ? path.basename(c.path) : ''))
+          .map((c) => (typeof c.path === 'string' ? (c.path.split(/[\\/]/).pop() ?? '') : ''))
           .filter(Boolean)
           .slice(0, 3)
           .join(', ');
