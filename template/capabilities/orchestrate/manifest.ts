@@ -54,7 +54,24 @@ export function writeManifest(m: Manifest): Manifest {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   const tmp = `${p}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(validated, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, p);
+  // Windows AV/search-indexer can briefly hold the target → transient EPERM on rename.
+  // Retry a few times before surfacing (the write itself stays atomic via the tmp file).
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(tmp, p);
+      break;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if ((code === 'EPERM' || code === 'EACCES' || code === 'EBUSY') && attempt < 4) {
+        const until = Date.now() + 25 * (attempt + 1);
+        while (Date.now() < until) {
+          /* short sync backoff — manifest writes are tiny + rare */
+        }
+        continue;
+      }
+      throw e;
+    }
+  }
   return validated;
 }
 

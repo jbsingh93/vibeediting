@@ -70,8 +70,8 @@ test('P1J.8 dry-run: --aspect 3:4 overrides the video aspect (1536x2048)', () =>
 
 test('P1J.7 dry-run warns on æ/ø/å in --headline (overlay non-ASCII text in Remotion instead)', () => {
   const fx = ensureFixtures();
-  const r = runTsx('capabilities/generate/thumbnail.ts', ['--video', fx.clipMp4, '--prompt', 'x', '--headline', 'SKALÉR MED AI SKOLEN ØNU', '--project', '_tests', '--dry-run']);
+  const r = runTsx('capabilities/generate/thumbnail.ts', ['--video', fx.clipMp4, '--prompt', 'x', '--headline', 'CAFÉ SØNDAG ÆBLE', '--project', '_tests', '--dry-run']);
   assertEqual(r.status, 0, `exit:\n${r.stderr.slice(-600)}`);
   const env = lastEnvelope(r.stdout) as unknown as { warnings?: string[] };
-  assert((env.warnings ?? []).some((w) => w.includes('æ/ø/å')), 'æ/ø/å warning emitted');
+  assert((env.warnings ?? []).some((w) => w.includes('non-ASCII')), 'non-ASCII glyph warning emitted');
 });

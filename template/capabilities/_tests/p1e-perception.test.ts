@@ -42,9 +42,11 @@ test('P1E.4 reference-analyze extracts objective signals offline (ASL + palette)
   assert(s.durationSec > 1, 'measured duration');
 });
 
-test('P1E.1/.2 the preserve-exactly aliases delegate to the canonical skill scripts', () => {
+test('P1E.1/.2 the canonical scripts are physically promoted (no delegate shims left)', () => {
   for (const rel of ['perception/gemini-video-review.ts', 'perception/cut-doctor.ts', 'generate/elevenlabs-tts.ts', 'generate/elevenlabs-music.ts', 'generate/elevenlabs-sfx.ts']) {
     const src = fs.readFileSync(path.join(REPO_ROOT, 'capabilities', rel), 'utf8');
-    assert(/delegateToSkillScript\(/.test(src), `${rel} should alias via delegateToSkillScript`);
+    assert(!/delegateToSkillScript\(/.test(src), `${rel} must be the real script, not a delegate shim`);
+    assert(src.length > 2000, `${rel} looks too small to be the promoted canonical script`);
   }
+  assert(!fs.existsSync(path.join(REPO_ROOT, 'capabilities', '_env', 'delegate.ts')), 'delegate.ts must be gone (promotion done)');
 });

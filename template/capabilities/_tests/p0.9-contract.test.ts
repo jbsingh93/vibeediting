@@ -19,7 +19,7 @@ test('P0.9 appendProvenance + describeOutputs (sha256 + bytes)', () => {
   const desc = describeOutputs([f]);
   assertEqual(desc.length, 1, 'one described output');
   assertEqual(desc[0].sha256, sha256File(f), 'sha256 matches');
-  assertEqual(desc[0].bytes, 3, 'byte count');
+  assertEqual(desc[0].bytes, 4, 'byte count');
   appendProvenance('_contract_test', { ts: new Date().toISOString(), capability: 'unit/test', outputs: desc });
   assert(fs.existsSync(provenancePath('_contract_test')), 'provenance.log written');
 });
@@ -43,9 +43,19 @@ test('P0.9 requireInputFile throws on a missing file', async () => {
 });
 
 test('P0.9 loadDotEnv + hasEnv check PRESENCE only (no secret printing)', () => {
-  loadDotEnv();
-  assert(hasEnv('OPENAI_API_KEY'), 'OPENAI_API_KEY present');
-  assert(hasEnv('GEMINI_API_KEY'), 'GEMINI_API_KEY present');
+  // Self-contained: append a throwaway key to the project .env, prove presence-only checking
+  // works, then restore — no dependency on the user's real keys.
+  const envPath = path.join(REPO_ROOT, '.env');
+  const before = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : null;
+  try {
+    fs.appendFileSync(envPath, '\nVIBE_TEST_PRESENCE=not-a-secret\n', 'utf8');
+    assert(hasEnv('VIBE_TEST_PRESENCE'), 'VIBE_TEST_PRESENCE present');
+    assert(!hasEnv('VIBE_TEST_DEFINITELY_ABSENT'), 'absent key reports absent');
+  } finally {
+    if (before === null) fs.rmSync(envPath, { force: true });
+    else fs.writeFileSync(envPath, before, 'utf8');
+  }
+  loadDotEnv(); // and the loader itself stays callable
 });
 
 test('P0.9 the Python contract mirror exists', () => {

@@ -1,5 +1,6 @@
 /** P1F — acquire: HTML→Markdown extraction, asset filename/hash, provenance, yt-dlp wiring. */
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { test, assert, assertEqual } from './harness';
 import { lastEnvelope, runPy } from './fixtures';
 import { htmlToMarkdown } from '../acquire/fetch-url';
@@ -42,6 +43,7 @@ test('P1F.2 download-media.py wires yt-dlp to the FULL ffmpeg build (dry-run)', 
   const r = runPy('capabilities/acquire/download-media.py', ['--url', 'https://youtube.com/watch?v=x', '--project', '_tests', '--dry-run']);
   assertEqual(r.status, 0, `dry-run exit:\n${r.stderr.slice(-400)}`);
   const m = lastEnvelope(r.stdout).metrics;
-  assert(String(m.ffmpeg_location).toLowerCase().includes('ffmpeg'), 'merges with the full ffmpeg');
+  const ffmpegBin = path.join(String(m.ffmpeg_location), process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+  assert(fs.existsSync(ffmpegBin), `merges with the full ffmpeg (no binary at ${ffmpegBin})`);
   assert(!!m.yt_dlp, 'yt-dlp present');
 });
