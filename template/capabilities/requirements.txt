@@ -1,0 +1,32 @@
+# vibe capabilities — shared Python venv deps (OPTIONAL — see _env/setup-venv.ts).
+# Install via: tsx capabilities/_env/setup-venv.ts   (or `vibe setup --venv`)
+# Pins frozen from a known-good Python 3.12 resolve; re-verify per-OS when bumping.
+#
+# No torch / local-VFX deps: there are NO local/free VFX models
+# (matting/upscale/depth/flow/inpaint all out of scope) — generative VFX is PAID cloud only
+# (Runway/Veo/Seedance). This venv stays torch-free.
+
+# --- audio/ : real mastering chain + measured loudness ---
+pedalboard==0.9.23
+pyloudnorm==0.2.0
+soundfile==0.13.1
+
+# NOTE: STT is OpenAI whisper-1 ONLY — no faster-whisper / local STT here.
+
+# --- ingest/ : beat detection for beat-matched cuts. Torch-free (numba/llvmlite). ---
+# NB: VAD/filler/last-take uses ffmpeg `silencedetect` (no torch); the shared venv stays torch-free.
+librosa==0.11.0
+
+# --- color/ : colorimetric LUT apply + still grading ---
+colour-science==0.4.7
+pillow==12.2.0
+pillow-lut==1.1.0
+opencv-python==4.13.0.92
+
+# --- shared ---
+numpy==2.4.6
+
+# --- acquire/ : web + media download ---
+# LOOSELY pinned ON PURPOSE: yt-dlp must update freely to track site changes — the ONE dep we do
+# NOT hard-pin. Needs the full ffmpeg (the shared resolver) to merge streams.
+yt-dlp>=2025.1.1

@@ -1,0 +1,223 @@
+{
+  "_README": [
+    "SINGLE SOURCE OF TRUTH for every AI model ID this project uses (now + planned).",
+    "Goal: when a newer/better model ships, change the 'id' here in ONE place.",
+    "",
+    "status field:",
+    "  'active'  = wired into a script TODAY. 'usedBy' lists the file(s).",
+    "  'planned' = not built yet; a future capability will read this.",
+    "",
+    "IMPORTANT (honest note): the 'active' scripts currently HARDCODE these IDs.",
+    "Editing this file does NOT yet change their behavior on its own — EXCEPT where 'envOverride' is set",
+    "(e.g. set the GEMINI_MODEL env var to swap Gemini without touching code).",
+    "Wiring every capability to READ this file is a planned refactor.",
+    "Until then, to change an 'active' model: set its envOverride if it has one, OR edit this file AND the 'usedBy' script(s).",
+    "",
+    "GOVERNING RULE: the video 'visual cortex' is gemini-3.1-flash-lite — never substitute Gemini 2.5.",
+    "VFX POLICY: NO local/free VFX models. Local matting/depth/optical-flow/upscale/inpaint models and",
+    "  local-free generators are not a supported path (consumer GPUs can't run them reliably).",
+    "  Generative video = PAID cloud, Runway + Veo + Seedance ONLY (no Kling/Pika/Luma/Sora). VFX otherwise = deterministic Remotion-native effects (free, code-it).",
+    "NOTE: non-model acquisition TOOLS (yt-dlp for web/social video download, acquire/) are pinned in capabilities/requirements.txt, not here — this file is model IDs only.",
+    "NOTE: screen-recording TOOLS (screen-record/) are NOT models either — Playwright is a browser-automation TOOL. Pin the `playwright` library in package.json devDeps (>=1.59, the page.screencast version) and `@playwright/mcp` (pinned EXACT — it iterates daily, NEVER @latest) in .mcp.json. See the _tools note for the pinned versions; doctor checks their presence."
+  ],
+  "_tools": {
+    "_note": "Non-model TOOLS the capability layer depends on (browser automation, downloaders). Pinned in package.json / .mcp.json / requirements.txt — recorded here so the 'edit one place to bump' discipline extends to tools.",
+    "playwright": { "pin": "1.59.0", "where": "package.json devDependencies", "purpose": "screen-record/ deterministic capture — the page.screencast({onFrame}) API ships in 1.59.", "status": "pinned (on-demand install: npm i -D playwright && npx playwright install chromium; doctor yellows if absent)" },
+    "playwrightMcp": { "pin": "@0.0.75 (EXACT — never @latest)", "where": ".mcp.json mcpServers.playwright", "purpose": "screen-record/ EXPLORE stage — a11y-tree browser automation + --codegen.", "status": "pinned (.mcp.json present; npx-resolved on first use)", "docs": "https://github.com/microsoft/playwright-mcp" }
+  },
+  "_meta": {
+    "updated": "2026-06-06",
+    "owner": "JBS Vibe Editing",
+    "note": "Active IDs verified against the capability scripts. Local/free VFX model sections (matting/depth/opticalFlow/upscale/inpaint + localFree generators) are intentionally absent per the VFX policy above.",
+    "envKeysInDotenv": ["OPENAI_API_KEY", "GEMINI_API_KEY", "ELEVENLABS_API_KEY"]
+  },
+
+  "perception": {
+    "visualCortex": {
+      "id": "gemini-3.1-flash-lite",
+      "provider": "google-gemini",
+      "status": "active",
+      "purpose": "Video 'eyes': describe + QA + scene/lighting analysis + bounding-box detection (auto-rotoscoping) + reference-video deconstruction into a style-spec (via the council). The QA/verifier model.",
+      "envOverride": "GEMINI_MODEL",
+      "cliFlag": "--model",
+      "usedBy": [
+        "capabilities/perception/gemini-video-review.ts",
+        "capabilities/perception/cut-doctor.ts",
+        "capabilities/perception/gemini-council.ts",
+        "capabilities/perception/reference-analyze.ts"
+      ],
+      "notes": "NEVER swap to gemini-2.5-*. Flash-lite over-reads — ground verdicts in objective signals.",
+      "alternatives": ["gemini-3.1-flash", "gemini-3.1-pro (only for a single bbox frame if flash-lite boxes are weak)"],
+      "docs": "https://ai.google.dev/gemini-api/docs"
+    }
+  },
+
+  "transcription": {
+    "cloud": {
+      "id": "whisper-1",
+      "provider": "openai",
+      "status": "active",
+      "purpose": "Word-level captions / ground-truth word timing (the 'ears'). OpenAI's hosted Whisper API model name.",
+      "cliFlag": "(none — hardcoded)",
+      "usedBy": [
+        "capabilities/ingest/transcribe.ts",
+        "capabilities/perception/cut-doctor.ts"
+      ],
+      "notes": "language null = auto-detect (handles mixed-language audio).",
+      "docs": "https://platform.openai.com/docs/guides/speech-to-text",
+      "rule": "STT is OpenAI whisper-1 ONLY — NO local/faster-whisper STT path or fallback. Do not re-introduce local STT."
+    }
+  },
+
+  "voice": {
+    "tts": {
+      "id": "eleven_multilingual_v2",
+      "provider": "elevenlabs",
+      "status": "active",
+      "purpose": "Default TTS model — stable, 29 languages, deterministic-friendly.",
+      "cliFlag": "--model (or --v3 shortcut)",
+      "usedBy": ["capabilities/generate/elevenlabs-tts.ts"],
+      "alternatives": ["eleven_v3 (most expressive, 74 langs, audio tags work; --v3)", "eleven_flash_v2_5 (real-time)"],
+      "docs": "https://elevenlabs.io/docs"
+    },
+    "ttsExpressive": {
+      "id": "eleven_v3",
+      "provider": "elevenlabs",
+      "status": "active",
+      "purpose": "Expressive/emotional TTS — required for audio tags ([excited], [whispers], ...). Selected via --v3.",
+      "cliFlag": "--v3",
+      "usedBy": ["capabilities/generate/elevenlabs-tts.ts"]
+    },
+    "music": {
+      "id": "music_v1",
+      "provider": "elevenlabs",
+      "status": "active",
+      "purpose": "Instrumental BGM generation (instrumental by default).",
+      "cliFlag": "--model",
+      "usedBy": ["capabilities/generate/elevenlabs-music.ts"],
+      "notes": "Only model currently available."
+    },
+    "sfx": {
+      "id": "eleven_text_to_sound_v2",
+      "provider": "elevenlabs",
+      "status": "active",
+      "purpose": "Text-to-sound-effects generation.",
+      "cliFlag": "--model",
+      "usedBy": ["capabilities/generate/elevenlabs-sfx.ts"]
+    },
+    "voiceId_default": {
+      "id": "",
+      "provider": "elevenlabs",
+      "status": "active",
+      "purpose": "The default TTS voice — INTENTIONALLY EMPTY. Set YOUR voice in brand/brand.json → voice.elevenlabsVoiceId (a cloned voice, or pick any at https://elevenlabs.io/voices); elevenlabs-tts.ts reads it from there (brand.json is the config boundary, not this file).",
+      "cliFlag": "--voice",
+      "usedBy": ["capabilities/generate/elevenlabs-tts.ts (via brand/brand.json)"],
+      "notes": "This is a VOICE id, not a model id. Instant Voice Cloning requires ElevenLabs Starter tier+ for API use (PAYG returns 401 ivc_not_permitted)."
+    }
+  },
+
+  "image": {
+    "thumbnail": {
+      "id": "gpt-image-2-2026-04-21",
+      "provider": "openai",
+      "status": "active",
+      "purpose": "Video thumbnails: a frame screenshot from the finished video + a text prompt → polished thumbnail in the video's aspect ratio, via /v1/images/edits. Identity/face preservation is automatic (the model always runs input images at high fidelity).",
+      "envOverride": "OPENAI_IMAGE_MODEL",
+      "cliFlag": "(none — reads this registry via modelId('image.thumbnail'))",
+      "usedBy": ["capabilities/generate/thumbnail.ts"],
+      "notes": "Pin the dated snapshot, not the 'gpt-image-2' alias. NEVER send input_fidelity (removed in gpt-image-2 — the request fails). Sizes: edges multiples of 16, long edge ≤3840, ratio ≤3:1; we generate at long-edge-2048 (16:9 → 2048x1152, 9:16 → 1152x2048) and downscale. Cost ≈ $0.04–0.21/image (medium–high) + input-frame tokens. Needs openai npm >6.34.0 (images.edit validator bug); we ship 6.37.0. Non-ASCII glyphs (æ/ø/å …) may garble in-model — overlay text in Remotion instead. Prompting rules: capabilities/generate/THUMBNAIL-GUIDE.md.",
+      "alternatives": ["gpt-image-2 (alias, auto-upgrades)", "gpt-image-1.5 (legacy — requires input_fidelity=high for faces)"],
+      "docs": "https://developers.openai.com/api/docs/models/gpt-image-2"
+    }
+  },
+
+  "color": {
+    "mlGrade": {
+      "id": "seunghyuns98/VideoColorGrading",
+      "provider": "ICCV 2025 (Shin et al., arXiv:2508.00548) — local PyTorch",
+      "status": "planned",
+      "purpose": "Reference-image -> generated .cube LUT (diffusion); apply via FFmpeg lut3d. Heavy/optional.",
+      "notes": "Checkpoints on Google Drive — pin a local mirror. Multi-sec/frame. Primary color path is deterministic FFmpeg lut3d, not this. (This is a COLOR model, not a VFX model — outside the no-local-VFX policy — but still deferred on-demand.)",
+      "alternatives": ["SA-LUT 4D (skin-tone-safe)", "NLUT"],
+      "docs": "https://github.com/seunghyuns98/VideoColorGrading"
+    }
+  },
+
+  "generativeVideo": {
+    "_note": "PAID CLOUD TRIO ONLY: Runway + Veo + Seedance. No local/free generator, no Kling/Pika/Luma/Sora. GENERATIVE IS A LAST RESORT: prefer deterministic Remotion-native effects (CSS/Tailwind/@remotion-*/GSAP/Three.js/Skia) — generative only for photoreal/organic content that can't be coded. All cloud + PAID; cost+approval gated by the APIBudgetGuard; async-poll; result URLs expire — download immediately. Prompting templates of record: capabilities/vfx/generate/templates/.",
+    "_cacheKeyRule": "Runway: sha256({prompt, model, seed, ref_image_sha256}). Veo + Seedance: sha256({prompt, model, ref_image_sha256, durationSec, aspect, resolution}) — neither exposes a deterministic seed parameter.",
+    "_routerRules": "Talking-head/identity-locked face → Veo 3.1 (NEVER Seedance 2.0, which blocks realistic faces). 9:16 vertical establishing plate → Veo 3.1. Mood/texture on black bg → Seedance 2.0. V2V relight/restyle → Runway Aleph. Rapid motion-iteration → Runway Gen-4 Turbo (5 credits/s, 2.5–3× faster than Gen-4.5).",
+    "veo": {
+      "id": "veo-3.1-generate-preview",
+      "provider": "Google Veo (via Gemini API key) — cloud, PAID",
+      "status": "planned",
+      "selected": true,
+      "purpose": "High-fidelity cinematic generation + start/end-frame control + timestamp prompting + Extend (chain to ~140s) + native synchronized audio + negative_prompt support. Default for talking-head, 9:16 ads, identity-locked multi-shot. Uses existing GEMINI_API_KEY (billing-enabled).",
+      "costPerSecondUsd": 0.40,
+      "notes": "PAID Standard tier ≈ $0.40/s. Veo 3.1 supports negative_prompt + audio_enabled + 'Ingredients to Video' character lock (3–4 ref images + repeat character descriptor word-for-word).",
+      "alternatives": ["veo-3.1-fast-generate-preview", "veo-3.1-lite"],
+      "docs": "https://ai.google.dev/gemini-api/docs/video"
+    },
+    "veoFast": {
+      "id": "veo-3.1-fast-generate-preview",
+      "provider": "Google Veo Fast (via Gemini API key) — cloud, PAID",
+      "status": "planned",
+      "selected": false,
+      "purpose": "Cheapest high-fidelity Veo tier — preferred for iteration drafts and longer sequences where Standard cost would blow the budget guard.",
+      "costPerSecondUsd": 0.15,
+      "notes": "$0.15/s — same Gemini key as standard Veo. Use when drafting; promote to Standard for final.",
+      "docs": "https://ai.google.dev/gemini-api/docs/video"
+    },
+    "runwayGen4_5": {
+      "id": "gen4.5",
+      "provider": "Runway Gen-4.5 (runwayml SDK) — cloud, PAID",
+      "status": "planned",
+      "selected": true,
+      "purpose": "Premium realism + camera-language fidelity. Supports `seed` (the ONLY provider in the trio that does — full GenerationCache determinism). Gen-4 References (contact-sheet, neutral expression) for identity-lock close-ups.",
+      "costPerSecondCredits": 12,
+      "notes": "12 credits/s. IMAGE-TO-VIDEO RULE: motion-only text — STRIP visual descriptors (subject/composition/color) from prompt or motion degrades.",
+      "docs": "https://docs.dev.runwayml.com"
+    },
+    "runwayGen4Turbo": {
+      "id": "gen4_turbo",
+      "provider": "Runway Gen-4 Turbo (runwayml SDK) — cloud, PAID",
+      "status": "planned",
+      "selected": true,
+      "purpose": "2.5–3× faster, ~40% cost of Gen-4.5 — the router's iteration tier (draft motion language here, render final on Gen-4.5).",
+      "costPerSecondCredits": 5,
+      "notes": "5 credits/s. Same SDK + auth as Gen-4.5; choose via the `model` argument.",
+      "docs": "https://docs.dev.runwayml.com"
+    },
+    "runwayAleph": {
+      "id": "aleph",
+      "provider": "Runway Aleph (runwayml SDK) — cloud, PAID",
+      "status": "planned",
+      "selected": true,
+      "purpose": "Video-to-video relight/restyle/in-context edit — purpose-built for transforming EXISTING footage (poorly-lit source clips, sky swaps, lighting changes). ≤30s / 10 cuts per request.",
+      "costPerSecondCredits": 15,
+      "notes": "Prompt rule: granular ('Change only the sky to sunset orange'), NEVER vague ('Make it look better'); always include 'Preserve [subject], [camera], [composition]'.",
+      "docs": "https://docs.dev.runwayml.com"
+    },
+    "seedance2": {
+      "id": "fal-ai/bytedance/seedance/v2/text-to-video",
+      "provider": "ByteDance Seedance 2.0 via fal.ai — cloud, PAID",
+      "status": "planned",
+      "selected": true,
+      "purpose": "Lowest-cost generator — strongest CAMERA LANGUAGE; multimodal @Image1/@Video1/@Audio1 references (up to 9/3/3); 'Cut to' multi-shot. Default for mood/textural shots on black bg.",
+      "costPerSecondUsd": 0.04,
+      "notes": "HARD RULES: (1) inject `cameraFixed:false` for ANY camera motion (default is locked → silent failure); (2) Seedance 2.0 BLOCKS realistic human faces — router MUST escalate to Veo 3.1 (or Seedance 1.5 Pro for lip-sync) when the brief involves a real person's face. NO seed parameter → cache key uses {prompt, model, ref_image_sha256, durationSec, aspect, resolution}.",
+      "alternatives": ["fal-ai/bytedance/seedance/v2/image-to-video", "bytedance/seedance-2.0 (Replicate)"],
+      "docs": "https://fal.ai/models"
+    },
+    "seedance1_5Pro": {
+      "id": "fal-ai/bytedance/seedance/v1-5-pro/text-to-video",
+      "provider": "ByteDance Seedance 1.5 Pro via fal.ai — cloud, PAID",
+      "status": "planned",
+      "selected": false,
+      "purpose": "Lip-sync fallback when Seedance 2.0 blocks a human-face shot AND Veo 3.1 is unavailable / over budget. Verify pricing and availability.",
+      "costPerSecondUsd": null,
+      "notes": "(verify) — pricing TBD; surfaced here so the router has a non-Veo fallback for lip-sync. Same fal.ai SDK + FAL_KEY.",
+      "docs": "https://fal.ai/models"
+    }
+  }
+}

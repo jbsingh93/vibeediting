@@ -1,0 +1,49 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { test, assert } from './harness';
+
+const CAPS = path.resolve(__dirname, '..');
+const FOLDERS = ['_env', 'acquire', 'ingest', 'perception', 'audio', 'color', 'motion', '3d', 'vfx', 'generate', 'assemble', 'orchestrate', 'deliver'];
+
+test('P0.6 every capability folder exists with a README', () => {
+  for (const f of FOLDERS) {
+    assert(fs.existsSync(path.join(CAPS, f)), `missing folder capabilities/${f}`);
+    assert(fs.existsSync(path.join(CAPS, f, 'README.md')), `missing capabilities/${f}/README.md`);
+  }
+});
+
+test('P0.1/P0.2/P0.3 _env artifacts exist', () => {
+  for (const f of ['ffmpeg.ts', 'doctor.ts', 'setup-venv.ts', 'contract.ts', 'contract.py', 'ffmpeg-capabilities.json', 'models.json']) {
+    assert(fs.existsSync(path.join(CAPS, '_env', f)), `missing capabilities/_env/${f}`);
+  }
+  assert(fs.existsSync(path.join(CAPS, 'requirements.txt')), 'missing capabilities/requirements.txt');
+});
+
+test('P0.6 models.json parses and the visual cortex is gemini-3.1-flash-lite', () => {
+  const raw = fs.readFileSync(path.join(CAPS, '_env', 'models.json'), 'utf8');
+  const models = JSON.parse(raw);
+  assert(
+    models.perception?.visualCortex?.id === 'gemini-3.1-flash-lite',
+    `visual cortex must be gemini-3.1-flash-lite, got ${models.perception?.visualCortex?.id}`,
+  );
+  // Guard the governing rule by checking actual id assignments — not prose (the notes field
+  // legitimately says "NEVER swap to gemini-2.5-*", which must not trip the guard).
+  assert(!/"id"\s*:\s*"gemini-2\.5/.test(raw), 'no model id may be gemini-2.5 (governing rule)');
+});
+
+test('P0.6 the default TTS voice id ships EMPTY (the user brings their own — brand.json)', () => {
+  const models = JSON.parse(fs.readFileSync(path.join(CAPS, '_env', 'models.json'), 'utf8'));
+  assert(models.voice?.voiceId_default, 'models.json must carry the voiceId_default entry');
+  assert(models.voice.voiceId_default.id === '', 'voiceId_default.id must ship EMPTY (no personal voice id)');
+});
+
+test('STT is OpenAI-only — no local/faster-whisper in registry or requirements (binding rule)', () => {
+  const modelsRaw = fs.readFileSync(path.join(CAPS, '_env', 'models.json'), 'utf8');
+  const models = JSON.parse(modelsRaw);
+  assert(!models.transcription?.local, 'models.json transcription.local (local STT) must NOT exist — STT is OpenAI whisper-1 only');
+  // Match only actual id/provider VALUES, not prose in a rule/notes field (which legitimately says "no faster-whisper").
+  assert(!/"(id|provider)"\s*:\s*"[^"]*faster[-_]?whisper/i.test(modelsRaw), 'no model id/provider may be faster-whisper');
+  assert(models.transcription?.cloud?.id === 'whisper-1', `STT model must be whisper-1, got ${models.transcription?.cloud?.id}`);
+  const reqs = fs.readFileSync(path.join(CAPS, 'requirements.txt'), 'utf8');
+  assert(!/faster.?whisper/i.test(reqs.replace(/^#.*$/gm, '')), 'requirements.txt must NOT install faster-whisper (comments excepted)');
+});
