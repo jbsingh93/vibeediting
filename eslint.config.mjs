@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -10,6 +11,15 @@ export default tseslint.config(
   {
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    // Plain-JS Node helpers (the mock agent runs under the node binary, not the TS toolchain).
+    files: ['tests/helpers/**/*.mjs'],
+    languageOptions: { globals: globals.node },
+    rules: {
+      // the mock strips a UTF-8 BOM with a literal BOM char in a regex — intentional
+      'no-irregular-whitespace': ['error', { skipRegExps: true }],
     },
   },
 );
