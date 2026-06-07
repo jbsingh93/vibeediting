@@ -26,6 +26,13 @@ coverage/
 test-artifacts/
 test-results/
 
+# --- gstack skill pack (project-local third-party install via setup --local; never vendor into the tree) ---
+.claude/skills/gstack*/
+.claude/skills/_gstack-command/
+
+# --- Playwright MCP browser output (live-QA walks; never committed) ---
+.playwright-mcp/
+
 # --- OS noise ---
 .DS_Store
 Thumbs.db

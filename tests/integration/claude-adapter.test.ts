@@ -64,7 +64,7 @@ describe('runClaudeTurn with the mock agent (zero subscription spend)', () => {
     // brain↔body: the mock's manifest edit is on disk (the watcher will push this to the UI)
     expect(readManifestRaw(tmp.projectsDir, 'a1').stages.ingest!.status).toBe('complete');
     // session persisted for multi-turn
-    expect(readSessionId(tmp.projectsDir, 'a1')).toBe('mock-session-1');
+    expect(readSessionId(tmp.projectsDir, 'a1', 'claude')).toBe('mock-session-1');
     // and the TurnResult summarizes the turn
     expect(result).toMatchObject({ status: 'done', sessionId: 'mock-session-1' });
     expect(result.result).toMatch(/Ingest complete/);

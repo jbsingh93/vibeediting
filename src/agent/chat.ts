@@ -66,22 +66,34 @@ function sessionFile(projectsRoot: string, project: string): string {
   return path.join(projectsRoot, project, 'agent.json');
 }
 
-export function readSessionId(projectsRoot: string, project: string): string | null {
+/** Which agent CLI owns a stored session — session ids are NOT interchangeable across adapters. */
+export type SessionAgent = 'claude' | 'codex';
+
+/**
+ * Read the saved session id ONLY when it belongs to the requesting adapter. A claude session UUID
+ * handed to `codex exec resume` (or vice-versa) makes the foreign CLI fail fast on an unknown thread
+ * and return a silent EMPTY turn — live-found at VT.4 (F17) when flipping a claude project to codex.
+ * Legacy `agent.json` files (no `agent` field) are treated as belonging to no adapter → one fresh
+ * turn, after which the next save stamps the owner correctly.
+ */
+export function readSessionId(projectsRoot: string, project: string, agent: SessionAgent): string | null {
   try {
     const j = JSON.parse(fs.readFileSync(sessionFile(projectsRoot, project), 'utf8')) as {
       session_id?: unknown;
+      agent?: unknown;
     };
-    return typeof j.session_id === 'string' ? j.session_id : null;
+    if (typeof j.session_id !== 'string') return null;
+    return j.agent === agent ? j.session_id : null;
   } catch {
     return null;
   }
 }
 
-export function saveSessionId(projectsRoot: string, project: string, sessionId: string): void {
+export function saveSessionId(projectsRoot: string, project: string, sessionId: string, agent: SessionAgent): void {
   try {
     const p = sessionFile(projectsRoot, project);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify({ session_id: sessionId }, null, 2) + '\n', 'utf8');
+    fs.writeFileSync(p, JSON.stringify({ session_id: sessionId, agent }, null, 2) + '\n', 'utf8');
   } catch {
     /* non-fatal — multi-turn just falls back to a fresh session */
   }

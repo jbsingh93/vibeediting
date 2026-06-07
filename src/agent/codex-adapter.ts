@@ -167,7 +167,7 @@ export function runCodexTurn(opts: AgentTurnOptions): Promise<TurnResult> {
   const reminder = state ? cockpitReminder(project, state) : null;
   if (reminder) prompt = `${reminder}\n\n${prompt}`;
 
-  const sessionId = opts.resume ?? readSessionId(root, project);
+  const sessionId = opts.resume ?? readSessionId(root, project, 'codex');
 
   // Prompt always rides stdin (`codex exec -` reads it) — immune to argv limits/newlines,
   // and stdin ALWAYS gets closed (the spike's hang finding). Note: `exec resume` does not
@@ -217,7 +217,7 @@ export function runCodexTurn(opts: AgentTurnOptions): Promise<TurnResult> {
     const forward = (e: AgentEvent): void => {
       if (e.type === 'session') {
         lastSession = e.sessionId;
-        saveSessionId(root, project, e.sessionId);
+        saveSessionId(root, project, e.sessionId, 'codex');
       }
       if (e.type === 'done') done = e;
       if (shouldPersistEvent(e)) appendChat(root, project, { t: 'event', e });

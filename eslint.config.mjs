@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/', 'ui-dist/', 'template/', 'node_modules/', 'DEV-DOCS/', 'test-artifacts/'],
+    ignores: ['dist/', 'ui-dist/', 'template/', 'node_modules/', 'DEV-DOCS/', 'test-artifacts/', '.playwright-mcp/', '.claude/'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

@@ -51,17 +51,36 @@ describe('chat.jsonl persistence', () => {
 });
 
 describe('session sidecar (projects/<p>/agent.json)', () => {
-  it('round-trips a session id', () => {
-    expect(readSessionId(tmp.projectsDir, 'p1')).toBeNull();
-    saveSessionId(tmp.projectsDir, 'p1', 'sid-123');
-    expect(readSessionId(tmp.projectsDir, 'p1')).toBe('sid-123');
+  it('round-trips a session id for the SAME adapter', () => {
+    expect(readSessionId(tmp.projectsDir, 'p1', 'claude')).toBeNull();
+    saveSessionId(tmp.projectsDir, 'p1', 'sid-123', 'claude');
+    expect(readSessionId(tmp.projectsDir, 'p1', 'claude')).toBe('sid-123');
+  });
+
+  it('never hands one adapter session id to another (VT.4 F17 — claude↔codex switch)', () => {
+    saveSessionId(tmp.projectsDir, 'p-switch', '5580032f-claude-uuid', 'claude');
+    // codex must NOT resume a claude session (it would fail fast → silent empty turn)
+    expect(readSessionId(tmp.projectsDir, 'p-switch', 'codex')).toBeNull();
+    // claude still continues its own session
+    expect(readSessionId(tmp.projectsDir, 'p-switch', 'claude')).toBe('5580032f-claude-uuid');
+    // once codex saves its own thread, each adapter sees only its own
+    saveSessionId(tmp.projectsDir, 'p-switch', 'codex-thread-abc', 'codex');
+    expect(readSessionId(tmp.projectsDir, 'p-switch', 'codex')).toBe('codex-thread-abc');
+    expect(readSessionId(tmp.projectsDir, 'p-switch', 'claude')).toBeNull();
+  });
+
+  it('drops a legacy sidecar with no agent field (one fresh turn, then re-stamped)', () => {
+    const dir = path.join(tmp.projectsDir, 'p-legacy');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'agent.json'), JSON.stringify({ session_id: 'legacy-sid' }));
+    expect(readSessionId(tmp.projectsDir, 'p-legacy', 'claude')).toBeNull();
   });
 
   it('returns null for malformed sidecars', () => {
     const dir = path.join(tmp.projectsDir, 'p3');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'agent.json'), '{not json');
-    expect(readSessionId(tmp.projectsDir, 'p3')).toBeNull();
+    expect(readSessionId(tmp.projectsDir, 'p3', 'claude')).toBeNull();
   });
 });
 

@@ -42,3 +42,16 @@ test('P1N.4 source contract: CDP capture acks every frame (single-frame flow con
   assertIncludes(code, 'Page.screencastFrameAck', 'frame ACK present — without it Chrome stops sending');
   assertIncludes(code, 'buildConcatManifest', 'timing reconstructed via the unit-tested concat manifest');
 });
+
+test('P1N.5 frozen-capture guard flags off-display screencast starvation (VT.4 F14)', async () => {
+  const { isFrozenCapture } = await import('../screen-record/record-session');
+  // screencast/screenshot froze: expected many frames (≥10) but captured ≤1 → frozen
+  assert(isFrozenCapture('screencast', 1, 6.5, 30) === true, 'screencast 1 frame over 6.5s → frozen');
+  assert(isFrozenCapture('screenshot', 0, 5, 30) === true, 'screenshot 0 frames over 5s → frozen');
+  // a healthy capture (frames ≈ wall×fps) is NOT frozen
+  assert(isFrozenCapture('screenshot', 126, 5.3, 30) === false, 'screenshot 126 frames → not frozen');
+  // a genuinely tiny plan (expected < 10 frames) must not false-positive
+  assert(isFrozenCapture('screencast', 1, 0.2, 30) === false, 'tiny 0.2s plan → not flagged');
+  // gdigrab is ffmpeg-clock-driven → never considered frozen by this guard
+  assert(isFrozenCapture('gdigrab', 1, 6.5, 30) === false, 'gdigrab exempt');
+});

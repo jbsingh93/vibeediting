@@ -8,7 +8,7 @@ import { api, ApiError } from '../lib/api';
 import type { AcquireWhat } from '../lib/types';
 
 const WHAT_OPTIONS: { id: AcquireWhat; label: string; hint: string }[] = [
-  { id: 'media', label: 'A video/clip to use', hint: 'yt-dlp → test-video/<p>/refs/' },
+  { id: 'media', label: 'A video/clip to use', hint: 'yt-dlp → deliver/<p>/refs/' },
   { id: 'asset', label: 'An asset (image/font/LUT)', hint: 'download-asset' },
   { id: 'page', label: 'A page of text/reference', hint: 'fetch-url → markdown' },
   { id: 'mimic', label: 'A video to MIMIC', hint: '+ reference-analyze → style-spec' },

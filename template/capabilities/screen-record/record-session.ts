@@ -40,6 +40,24 @@ function arg(name: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
+/**
+ * Frozen-capture detector (GAP-62 / VT.4 F14): the CDP-driven capture modes (page.screencast and the
+ * screenshot loop) depend on the compositor ticking; off-display/headless throttling can starve them to
+ * a single repeated frame while the ffmpeg encode still exits 0. When we expected many frames but
+ * captured ≤1, the clip is unusable — the caller should re-run with `--capture screenshot`. gdigrab is
+ * ffmpeg-clock-driven (reliable frame count), so it is never considered frozen here. Pure for testing.
+ */
+export function isFrozenCapture(
+  captureMode: 'screencast' | 'gdigrab' | 'screenshot',
+  framesCaptured: number,
+  wallSec: number,
+  fps: number,
+): boolean {
+  if (captureMode === 'gdigrab') return false;
+  const expected = Math.round(wallSec * fps);
+  return expected >= 10 && framesCaptured <= 1;
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 async function main(): Promise<void> {
   await runCapability('screen-record/record-session', async () => {
@@ -219,16 +237,35 @@ async function main(): Promise<void> {
     const durationSec = parseFloat(meta.format?.duration ?? '0');
     const scriptSha256 = crypto.createHash('sha256').update(fs.readFileSync(planPath)).digest('hex');
     const urls = planNavTargets(plan);
+    const frameCount = parseInt(v.nb_read_packets ?? '0', 10);
+
+    // Frozen-capture guard (GAP-62, live-found VT.4 F14): off-display compositor throttling can starve
+    // page.screencast to a single repeated frame. The ffmpeg encode still "succeeds", so the run would
+    // otherwise report a happy envelope for an unusable clip — only the downstream verify-screencast
+    // not-frozen meter would reject it. Warn loudly at capture time and point at the robust fallback.
+    // gdigrab is ffmpeg-clock-driven (its frame count is reliable), so it's exempt.
+    const frozen = isFrozenCapture(captureMode, framesCaptured, wallSec, fps);
+    const warnings: string[] = [];
+    if (frozen) {
+      const w =
+        `capture froze: only ${framesCaptured} frame(s) over ${wallSec.toFixed(1)}s ` +
+        `(expected ~${Math.round(wallSec * fps)} @ ${fps}fps) — the '${captureMode}' compositor was ` +
+        `throttled (off-display/headless). Re-run with --capture screenshot for a robust ` +
+        `frame-per-paint capture; the verify-screencast not-frozen meter will otherwise reject this clip.`;
+      warnings.push(w);
+      process.stderr.write(`⚠ ${w}\n`);
+    }
 
     return {
       outputs: [output],
       metrics: {
         capture: captureLabel, encoder, fps,
         width: parseInt(v.width ?? String(width), 10), height: parseInt(v.height ?? String(height), 10),
-        deviceScaleFactor: dscf, framesCaptured, frameCount: parseInt(v.nb_read_packets ?? '0', 10),
+        deviceScaleFactor: dscf, framesCaptured, frameCount,
         durationSec: +durationSec.toFixed(3), wallSec: +wallSec.toFixed(1), rFrameRate: v.r_frame_rate ?? null,
-        ship: isShipPath(output), scriptSha256, targetUrls: urls, auth: redactAuthRef(storageState),
+        frozen, ship: isShipPath(output) && !frozen, scriptSha256, targetUrls: urls, auth: redactAuthRef(storageState),
       },
+      warnings: warnings.length ? warnings : undefined,
       project, source: urls[0], args: process.argv.slice(2),
     };
   });

@@ -158,7 +158,7 @@ export function runClaudeTurn(opts: AgentTurnOptions): Promise<TurnResult> {
   const reminder = state ? cockpitReminder(project, state) : null;
   if (reminder) prompt = `${reminder}\n\n${prompt}`;
 
-  const sessionId = opts.resume ?? readSessionId(root, project);
+  const sessionId = opts.resume ?? readSessionId(root, project, 'claude');
 
   // Only pass --agent / --settings when the seeded files actually exist (a bare folder —
   // pre-init, or the GATE V1 smoke — must still produce a valid turn).
@@ -218,7 +218,7 @@ export function runClaudeTurn(opts: AgentTurnOptions): Promise<TurnResult> {
     const forward = (e: AgentEvent): void => {
       if (e.type === 'session') {
         lastSession = e.sessionId;
-        saveSessionId(root, project, e.sessionId);
+        saveSessionId(root, project, e.sessionId, 'claude');
       }
       if (e.type === 'done') done = e;
       if (shouldPersistEvent(e)) appendChat(root, project, { t: 'event', e });
@@ -247,7 +247,7 @@ export function runClaudeTurn(opts: AgentTurnOptions): Promise<TurnResult> {
       // flush a trailing partial line if it parses
       const evt = parseAgentLine(buf);
       if (evt) for (const e of eventsFromLine(evt, pending)) forward(e);
-      if (lastSession) saveSessionId(root, project, lastSession);
+      if (lastSession) saveSessionId(root, project, lastSession, 'claude');
       if (errored) {
         resolve({ status: 'offline', result: '', reason: 'claude CLI not found' });
         return;

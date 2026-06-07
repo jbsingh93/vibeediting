@@ -71,7 +71,7 @@ describe('runCodexTurn with the mock codex bin (zero subscription spend)', () =>
     expect(done && 'result' in done && done.result).toMatch(/Probed the clip/);
 
     // the session persisted for multi-turn continuity, and the TurnResult summarizes the turn
-    expect(readSessionId(tmp.projectsDir, 'c1')).toBe('019e9e67-cf77-7f03-b7b3-bbc49acb57d8');
+    expect(readSessionId(tmp.projectsDir, 'c1', 'codex')).toBe('019e9e67-cf77-7f03-b7b3-bbc49acb57d8');
     expect(result).toMatchObject({ status: 'done', sessionId: '019e9e67-cf77-7f03-b7b3-bbc49acb57d8' });
 
     // chat.jsonl: user line + replayable events (session is transient, never replayed)
