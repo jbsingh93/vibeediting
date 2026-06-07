@@ -8,9 +8,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import { WebSocket as WsClient, type MessageEvent as WsMessageEvent } from 'ws';
 import { startServer } from '../../src/server/index.js';
 import type { AgentEvent } from '../../src/agent/events.js';
 import { makeTempVibeProject, MOCK_AGENT, type TempVibeProject } from '../helpers/temp-vibe-project.js';
+
+// Node 20 has no global WebSocket (it landed in Node 21) — use the `ws` client, whose
+// addEventListener/MessageEvent surface matches the WHATWG API this test drives.
+const WebSocketImpl = (globalThis.WebSocket ?? WsClient) as unknown as typeof WsClient;
 
 let app: FastifyInstance;
 let port: number;
@@ -39,7 +44,7 @@ function runTurn(
   timeoutMs = 10_000,
 ): Promise<{ events: AgentEvent[] }> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/agent`);
+    const ws = new WebSocketImpl(`ws://127.0.0.1:${port}/ws/agent`);
     const events: AgentEvent[] = [];
     const timer = setTimeout(() => {
       try {
@@ -51,7 +56,7 @@ function runTurn(
     }, timeoutMs);
 
     ws.addEventListener('open', () => ws.send(JSON.stringify(message)));
-    ws.addEventListener('message', (ev: MessageEvent) => {
+    ws.addEventListener('message', (ev: WsMessageEvent) => {
       const data = typeof ev.data === 'string' ? ev.data : String(ev.data);
       let e: AgentEvent;
       try {
@@ -105,14 +110,14 @@ describe('/ws/agent', () => {
     tmp.seedManifest('p3', { mode: 'wizard' });
     // cancel with no in-flight turn is a no-op; the socket should stay healthy enough to then run.
     await new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/agent`);
+      const ws = new WebSocketImpl(`ws://127.0.0.1:${port}/ws/agent`);
       const timer = setTimeout(() => reject(new Error('cancel turn timed out')), 8_000);
       ws.addEventListener('open', () => {
         ws.send(JSON.stringify({ type: 'cancel', project: 'p3' }));
         // then a real turn proves the server is still alive
         ws.send(JSON.stringify({ type: 'user', project: 'p3', text: 'after cancel' }));
       });
-      ws.addEventListener('message', (ev: MessageEvent) => {
+      ws.addEventListener('message', (ev: WsMessageEvent) => {
         const e = JSON.parse(typeof ev.data === 'string' ? ev.data : String(ev.data)) as AgentEvent;
         if (e.type === 'done' || e.type === 'offline') {
           clearTimeout(timer);

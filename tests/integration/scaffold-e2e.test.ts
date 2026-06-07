@@ -153,13 +153,15 @@ describe.skipIf(!ENABLED)('V3.6 killer integration: init → suite → lint → 
           payload: { compId: 'DemoWelcome', preset: 'scene-clip', outName: 'e2e-proof/ui-smoke', frames: '0-29' },
         });
         expect(render.statusCode, `POST /api/render: ${render.body}`).toBe(200);
-        const jobId = (render.json() as { id: string }).id;
+        // Job routes wrap records in a { job } envelope (the client api.ts contract).
+        const jobId = (render.json() as { job: { id: string } }).job.id;
+        expect(jobId).toBeTruthy();
 
         const deadline = Date.now() + 8 * 60 * 1000;
         let job: { status: string; progress?: number; error?: string } = { status: 'queued' };
         while (Date.now() < deadline) {
           const r = await app.inject({ method: 'GET', url: `/api/jobs/${jobId}` });
-          job = r.json() as typeof job;
+          job = (r.json() as { job: typeof job }).job;
           if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') break;
           await new Promise((resolve) => setTimeout(resolve, 2000));
         }
