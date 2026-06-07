@@ -8,6 +8,7 @@
  *
  * CLI: tsx render-preset.ts --preset vertical-ad --comp CompId [--out NAME] [--dry-run] [--props FILE]
  */
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { run, runCapability } from '../_env/contract';
 
@@ -25,6 +26,17 @@ export type Preset =
   | 'scene-clip-greenkey';
 
 /**
+ * Concurrency capped at the machine's cores: Remotion HARD-FAILS when --concurrency exceeds
+ * available CPUs ("concurrency is set higher than the amount of CPU cores available") — the
+ * preset targets below are ideals from a big workstation; a 2–4-core laptop must still render.
+ * (Live-found on a 3-core CI runner at GATE V4.)
+ */
+function conc(target: number): string {
+  const cores = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+  return `--concurrency=${Math.max(1, Math.min(target, cores))}`;
+}
+
+/**
  * Returns the remotion-render argv (after "render") for a preset + output path.
  *
  * `outName` may include path segments (e.g. `<project>/scenes/03-attention-trap-v2`) — the
@@ -37,27 +49,27 @@ export function presetArgs(preset: Preset, compId: string, outName: string): { e
     case 'square-ad':
     case 'portrait-feed':
     case 'reel-60fps':
-      return { ext: 'mp4', args: [compId, base('mp4'), '--codec=h264', '--crf=18', '--pixel-format=yuv420p', '--concurrency=4'] };
+      return { ext: 'mp4', args: [compId, base('mp4'), '--codec=h264', '--crf=18', '--pixel-format=yuv420p', conc(4)] };
     case 'youtube-1080':
-      return { ext: 'mp4', args: [compId, base('mp4'), '--codec=h264', '--crf=18', '--pixel-format=yuv420p', '--concurrency=8', '--audio-bitrate=192k'] };
+      return { ext: 'mp4', args: [compId, base('mp4'), '--codec=h264', '--crf=18', '--pixel-format=yuv420p', conc(8), '--audio-bitrate=192k'] };
     case 'youtube-4k':
-      return { ext: 'mp4', args: [compId, base('mp4'), '--scale=2', '--codec=h264', '--crf=16', '--concurrency=8', '--audio-bitrate=192k'] };
+      return { ext: 'mp4', args: [compId, base('mp4'), '--scale=2', '--codec=h264', '--crf=16', conc(8), '--audio-bitrate=192k'] };
     case 'transparent-overlay':
-      return { ext: 'mov', args: [compId, base('mov'), '--codec=prores', '--proresProfile=4444', '--pixel-format=yuva444p10le', '--image-format=png', '--concurrency=4'] };
+      return { ext: 'mov', args: [compId, base('mov'), '--codec=prores', '--proresProfile=4444', '--pixel-format=yuva444p10le', '--image-format=png', conc(4)] };
 
     // ── scene-clip family (P3.5b / GAP-53) ───────────────────────────────────
     // H.264 1080p B-roll clip. fps is locked at the Composition level (calculateMetadata).
     // Pair with `<SceneClip background='opaque'>` for hard-cut B-roll.
     case 'scene-clip':
-      return { ext: 'mp4', args: [compId, base('mp4'), '--codec=h264', '--crf=17', '--pixel-format=yuv420p', '--concurrency=4', '--audio-bitrate=192k'] };
+      return { ext: 'mp4', args: [compId, base('mp4'), '--codec=h264', '--crf=17', '--pixel-format=yuv420p', conc(4), '--audio-bitrate=192k'] };
     // Alpha-out scene clip — re-uses the ProRes 4444 path so motion sits over a face-cam
     // with no chromakey. Pair with `<SceneClip background='transparent'>`.
     case 'scene-clip-alpha':
-      return { ext: 'mov', args: [compId, base('mov'), '--codec=prores', '--proresProfile=4444', '--pixel-format=yuva444p10le', '--image-format=png', '--concurrency=4'] };
+      return { ext: 'mov', args: [compId, base('mov'), '--codec=prores', '--proresProfile=4444', '--pixel-format=yuva444p10le', '--image-format=png', conc(4)] };
     // Green-screen H.264 scene clip — comp is rendered ONTO a flat #00FF00 plate; downstream
     // `assemble/chromakey` keys it out. Pair with `<SceneClip background='green-key-friendly' palette={…}>`.
     case 'scene-clip-greenkey':
-      return { ext: 'mp4', args: [compId, base('mp4'), '--codec=h264', '--crf=15', '--pixel-format=yuv420p', '--concurrency=4', '--audio-bitrate=192k'] };
+      return { ext: 'mp4', args: [compId, base('mp4'), '--codec=h264', '--crf=15', '--pixel-format=yuv420p', conc(4), '--audio-bitrate=192k'] };
 
     default:
       throw new Error(`unknown preset: ${preset}`);
