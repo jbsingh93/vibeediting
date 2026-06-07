@@ -1,0 +1,39 @@
+# VIBE:GENERATED {{VIBE_VERSION}} — seeded by `vibe init` (renamed from `gitignore` to `.gitignore`).
+# Edit freely; `vibe upgrade` never overwrites files you have changed.
+
+# ── dependencies & build ─────────────────────────────────────────────
+node_modules/
+*.log
+*.tsbuildinfo
+
+# ── secrets — NEVER commit (your API keys live in .env) ──────────────
+.env
+.env.local
+
+# ── render output & disposable work (regenerable any time) ───────────
+out/
+
+# ── machine-specific provisioning (re-created by `vibe setup`) ───────
+.vibe/bin/
+capabilities/.venv/
+capabilities/_env/ffmpeg-capabilities.json
+capabilities/_env/__pycache__/
+capabilities/**/__pycache__/
+
+# ── media — keep heavy source/render media out of git ────────────────
+# (project assets live in public/<project>/; captions/props JSON stays tracked)
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.avi
+*.wav
+*.mp3
+*.flac
+*.aac
+*.m4a
+in/
+
+# ── OS noise ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

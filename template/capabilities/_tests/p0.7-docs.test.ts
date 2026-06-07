@@ -15,6 +15,25 @@ test('P0.7 CAPABILITIES.md exists with the wiki-compatible §0–§17 structure'
   assertIncludes(md, 'whisper-1', 'CAPABILITIES.md must state the whisper-1 STT rule');
 });
 
+test('P0.7 CLAUDE.md exists with the binding agent guide (V3 — returns after the V2 deferral)', () => {
+  const md = read('CLAUDE.md');
+  assertIncludes(md, 'Hard rules', 'CLAUDE.md must carry the hard-rules section');
+  assertIncludes(md, 'whisper-1', 'CLAUDE.md must state the whisper-1 STT rule');
+  assertIncludes(md, 'gemini-3.1-flash-lite', 'CLAUDE.md must pin the visual cortex model');
+  assertIncludes(md, '−14 LUFS', 'CLAUDE.md must state the loudness target');
+  assertIncludes(md, 'No Remotion Studio', 'CLAUDE.md must state the no-Studio rule (hard rule 6)');
+  assertIncludes(md, 'CAPABILITIES.md', 'CLAUDE.md must point at the capability index');
+  assertIncludes(md, 'video-editor', 'CLAUDE.md must route to the video-editor skill');
+});
+
+test('P0.7 AGENTS.md mirrors CLAUDE.md for Codex (persona inlined)', () => {
+  const md = read('AGENTS.md');
+  assertIncludes(md, 'Hard rules', 'AGENTS.md must carry the hard-rules section');
+  assertIncludes(md, 'whisper-1', 'AGENTS.md must state the whisper-1 STT rule');
+  assertIncludes(md, 'COCKPIT CONTRACT', 'AGENTS.md must inline the cockpit contract (Codex has no --agent persona)');
+  assertIncludes(md, 'manifest.notes', 'AGENTS.md cockpit contract must name manifest.notes');
+});
+
 test('P0.8 capabilities/README.md documents licensing (Pedalboard GPLv3 + Remotion tier)', () => {
   const md = read('capabilities/README.md');
   assertIncludes(md, 'GPLv3', 'license note is missing Pedalboard GPLv3');

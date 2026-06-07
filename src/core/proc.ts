@@ -113,7 +113,11 @@ export function launchSpec(bin: string, args: string[]): LaunchSpec {
     const commandLine = [resolved, ...args].map(quoteForCmd).join(' ');
     return {
       command: process.env.ComSpec || 'cmd.exe',
-      args: ['/d', '/s', '/c', commandLine],
+      // The OUTER quotes around the whole line are load-bearing: `cmd /s /c` strips the
+      // first and last quote character of the line, so without them a quoted spaced path
+      // ("C:\Program Files\nodejs\npm.cmd" …) degrades to `C:\Program …` and breaks.
+      // (Found live at V3 — the first .cmd that doesn't resolve to a sibling .exe.)
+      args: ['/d', '/s', '/c', `"${commandLine}"`],
       windowsVerbatimArguments: true,
     };
   }

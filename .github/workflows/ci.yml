@@ -44,6 +44,8 @@ jobs:
         run: node dist/bin/vibe.js --version
 
       # Guard the published tarball: nothing outside the `files` whitelist may ship.
+      # NOTE: the npm `files` whitelist OVERRIDES .gitignore inside listed dirs (verified
+      # during V3) — machine artifacts under template/ must be banned here explicitly.
       - name: Tarball content guard
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
         run: |
@@ -53,7 +55,47 @@ jobs:
             const banned = files.filter(p =>
               p.startsWith('DEV-DOCS/') || p.startsWith('tests/') ||
               p.startsWith('docs/') || p.startsWith('test-artifacts/') ||
-              p.startsWith('.env'));
+              p.startsWith('.env') ||
+              p.startsWith('template/.vibe/') || p.startsWith('template/out/') ||
+              p.startsWith('template/node_modules/') ||
+              p === 'template/.env' ||
+              p.endsWith('ffmpeg-capabilities.json'));
             if (banned.length) { console.error('Banned paths in tarball:', banned); process.exit(1); }
+            const required = ['template/gitignore', 'template/.env.example',
+              'template/.claude/skills/video-editor/SKILL.md',
+              'template/.claude/agents/vibe-studio.md',
+              'template/src/demo-welcome/Main.tsx', 'template/brand/brand.json'];
+            const missing = required.filter(p => !files.includes(p));
+            if (missing.length) { console.error('Required template payload missing from tarball:', missing); process.exit(1); }
             console.log('Tarball clean:', files.length, 'files');
           "
+
+  # V3.6 — the killer integration test: vibe init into a tmpdir → the scaffold's own
+  # capability suite + strict lint + a real DemoWelcome still render. Win + mac per GATE V3.
+  scaffold-e2e:
+    name: scaffold e2e / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: npm ci
+
+      - name: Scaffold e2e (init → suite → lint → render)
+        run: npx vitest run tests/integration/scaffold-e2e.test.ts
+        env:
+          VIBE_SCAFFOLD_E2E: '1'

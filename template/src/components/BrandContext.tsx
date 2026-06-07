@@ -1,9 +1,12 @@
 import React, { createContext, useContext } from 'react';
+import brandConfig from '../../brand/brand.json';
+import fontsConfig from '../../brand/fonts.json';
 
 /**
  * Brand tokens. Single source of truth for colors, fonts, weights — the values come
- * from YOUR `brand/brand.json` (edit it in the UI's Brand page or by hand); these
- * defaults are a neutral dark theme so everything renders fine before you brand it.
+ * from YOUR `brand/brand.json` + `brand/fonts.json` (edit them in the UI's Brand page,
+ * by hand, or let the agent fill them in). They are bundled at build time; the
+ * neutral defaults below cover any key you haven't set yet.
  *
  * Wrap your composition root in <BrandContext> so every component reads consistent values.
  *
@@ -73,23 +76,69 @@ export const BRAND_DEFAULT: Brand = {
   },
 };
 
-const BrandCtx = createContext<Brand>(BRAND_DEFAULT);
+/** Merge a partial brand over a base, depth-1 per token group. */
+const mergeBrand = (base: Brand, over: Partial<Brand>): Brand => ({
+  ...base,
+  ...over,
+  colors: { ...base.colors, ...(over.colors ?? {}) },
+  fonts: { ...base.fonts, ...(over.fonts ?? {}) },
+  weights: { ...base.weights, ...(over.weights ?? {}) },
+  logo: { ...base.logo, ...(over.logo ?? {}) },
+});
+
+/** Pick a string off a loosely-typed config object (brand.json carries _comment keys etc.). */
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+/**
+ * Map brand/brand.json + brand/fonts.json onto the visual Brand tokens.
+ * Tolerant by design: any missing/empty key falls back to the neutral default,
+ * so a half-filled brand.json renders fine.
+ */
+export function brandFromConfig(config: unknown, fonts: unknown): Brand {
+  const cfg = (config ?? {}) as { colors?: Record<string, unknown>; logoPath?: unknown };
+  const fnt = (fonts ?? {}) as { heading?: unknown; body?: unknown; mono?: unknown; weights?: Record<string, unknown>; scale?: unknown };
+  const colors = cfg.colors ?? {};
+  const weights = fnt.weights ?? {};
+  const scale = Array.isArray(fnt.scale) && fnt.scale.every((n) => typeof n === 'number') ? (fnt.scale as number[]) : BRAND_DEFAULT.scale;
+  const logoPath = str(cfg.logoPath);
+  return mergeBrand(BRAND_DEFAULT, {
+    colors: {
+      primary: str(colors.primary) ?? BRAND_DEFAULT.colors.primary,
+      secondary: str(colors.secondary) ?? BRAND_DEFAULT.colors.secondary,
+      accent: str(colors.accent) ?? BRAND_DEFAULT.colors.accent,
+      success: str(colors.success) ?? BRAND_DEFAULT.colors.success,
+      danger: str(colors.danger) ?? BRAND_DEFAULT.colors.danger,
+      muted: str(colors.muted) ?? BRAND_DEFAULT.colors.muted,
+    },
+    fonts: {
+      heading: str(fnt.heading) ?? BRAND_DEFAULT.fonts.heading,
+      body: str(fnt.body) ?? BRAND_DEFAULT.fonts.body,
+      mono: str(fnt.mono) ?? BRAND_DEFAULT.fonts.mono,
+    },
+    weights: {
+      regular: num(weights.regular) ?? BRAND_DEFAULT.weights.regular,
+      medium: num(weights.medium) ?? BRAND_DEFAULT.weights.medium,
+      semibold: num(weights.semibold) ?? BRAND_DEFAULT.weights.semibold,
+      bold: num(weights.bold) ?? BRAND_DEFAULT.weights.bold,
+      black: num(weights.black) ?? BRAND_DEFAULT.weights.black,
+    },
+    scale,
+    logo: logoPath ? { light: logoPath, dark: logoPath } : BRAND_DEFAULT.logo,
+  });
+}
+
+/** The project's brand — brand/brand.json + brand/fonts.json over the neutral defaults. */
+export const PROJECT_BRAND: Brand = brandFromConfig(brandConfig, fontsConfig);
+
+const BrandCtx = createContext<Brand>(PROJECT_BRAND);
 
 export const BrandContext: React.FC<{
+  /** Per-composition override (rare) — merged over the project brand. */
   brand?: Partial<Brand>;
   children: React.ReactNode;
 }> = ({ brand, children }) => {
-  const merged: Brand = brand
-    ? {
-        ...BRAND_DEFAULT,
-        ...brand,
-        colors: { ...BRAND_DEFAULT.colors, ...(brand.colors ?? {}) },
-        fonts: { ...BRAND_DEFAULT.fonts, ...(brand.fonts ?? {}) },
-        weights: { ...BRAND_DEFAULT.weights, ...(brand.weights ?? {}) },
-        logo: { ...BRAND_DEFAULT.logo, ...(brand.logo ?? {}) },
-      }
-    : BRAND_DEFAULT;
-
+  const merged: Brand = brand ? mergeBrand(PROJECT_BRAND, brand) : PROJECT_BRAND;
   return <BrandCtx.Provider value={merged}>{children}</BrandCtx.Provider>;
 };
 

@@ -6,9 +6,43 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const SRC = path.join(ROOT, 'src');
 const MOTION = path.join(SRC, 'components', 'motion');
 
-// NOTE: the parent's per-composition checks (timeline schema / calculateMetadata wiring /
-// variant fan-out on real comps) return in V3 against the template's DemoWelcome comp —
-// they need src/Root.tsx + the demo composition, which land with the scaffolder.
+// The parent's per-composition checks returned at V3 against the template's DemoWelcome comp
+// (src/Root.tsx + src/demo-welcome/ land with the scaffolder — see the P3.0 block below).
+
+// ── P3.0 — demo composition + Root wiring (the V2-deferred comp checks, vs DemoWelcome) ──
+test('P3.0 src/index.ts registers the Root', () => {
+  const idx = fs.readFileSync(path.join(SRC, 'index.ts'), 'utf8');
+  assert(/registerRoot\(\s*Root\s*\)/.test(idx), 'src/index.ts must call registerRoot(Root)');
+});
+
+test('P3.0 Root.tsx registers the DemoWelcome composition', () => {
+  const root = fs.readFileSync(path.join(SRC, 'Root.tsx'), 'utf8');
+  assert(/id="DemoWelcome"/.test(root), 'Root.tsx must register id="DemoWelcome" (the render-gate target)');
+  assert(/from '\.\/demo-welcome\/Main'/.test(root), 'Root.tsx must import the demo comp from ./demo-welcome/Main');
+  assert(/<Composition/.test(root), 'Root.tsx must use <Composition>');
+});
+
+test('P3.0 DemoWelcome is media-free, brand-driven, frame-driven', () => {
+  const demo = fs.readFileSync(path.join(SRC, 'demo-welcome', 'Main.tsx'), 'utf8');
+  for (const banned of ['staticFile', 'OffthreadVideo', '<Video', '<Audio', '<Img']) {
+    assert(!demo.includes(banned), `DemoWelcome must be media-free — found ${banned}`);
+  }
+  assert(/BrandContext/.test(demo), 'DemoWelcome must wrap its scene in <BrandContext>');
+  assert(/useCurrentFrame|interpolate/.test(demo), 'DemoWelcome must be frame-driven');
+  // The CSS-animation ban (hard rule) — no transition/animation styles.
+  assert(!/animation\s*:/.test(demo) && !/transition\s*:/.test(demo), 'DemoWelcome must not use CSS animations/transitions');
+});
+
+test('P3.0 composition skeletons ship in the video-editor skill (data-driven starters)', () => {
+  const comps = path.join(ROOT, '.claude', 'skills', 'video-editor', 'templates', 'compositions');
+  for (const f of ['ShortAd9x16.tsx', 'Tutorial16x9.tsx', 'Square1x1.tsx']) {
+    assert(fs.existsSync(path.join(comps, f)), `missing skill composition skeleton ${f}`);
+    const src = fs.readFileSync(path.join(comps, f), 'utf8');
+    assert(/from '\.\.\/\.\.\/components'/.test(src), `${f} must import from src/components via ../../components (post-copy path)`);
+  }
+  const shortAd = fs.readFileSync(path.join(comps, 'ShortAd9x16.tsx'), 'utf8');
+  assert(/z\.object|zod/.test(shortAd), 'ShortAd9x16 must keep its Zod props schema (data-driven contract)');
+});
 
 // ── P3.3 — atomic motion library + GSAP engine ───────────────────────────────
 test('P3.3 atomic motion library exists in src/components/motion/', () => {

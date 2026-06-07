@@ -25,3 +25,6 @@ export { TransitionScenes } from './TransitionScenes';
 export type { TransitionKind, TransitionScene } from './TransitionScenes';
 export { VFXComposite, VFXImageOverlay } from './VFXComposite';
 export type { VFXCompositeProps, VFXLayerSpec, VFXTitleSpec } from './VFXComposite';
+export { ConfettiBurst } from './ConfettiBurst';
+export { PulseRing } from './PulseRing';
+export type { PulseRingProps } from './PulseRing';

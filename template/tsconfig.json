@@ -12,5 +12,15 @@
     "noUnusedLocals": true,
     "resolveJsonModule": true
   },
-  "exclude": ["remotion.config.ts", "node_modules"]
+  "exclude": [
+    "remotion.config.ts",
+    "node_modules",
+    ".claude",
+    "out",
+    ".vibe",
+    // Screen-record capture imports `playwright`, which is ON-DEMAND (`vibe setup --browser`)
+    // — excluded so a fresh scaffold typechecks before that optional install.
+    "capabilities/screen-record/record-session.ts",
+    "capabilities/screen-record/cdp-screencast.ts"
+  ]
 }

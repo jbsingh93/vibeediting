@@ -10,8 +10,8 @@ import * as path from 'node:path';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { UserError } from '../core/errors.js';
+import { findOnPath, launchSpec } from '../core/proc.js';
 import { provisionFfmpeg } from '../init/ffmpeg-provision.js';
-import { notImplemented } from './_stub.js';
 
 /** Run a project-local TypeScript entry via the project's own tsx (never npx — shim footgun). */
 function runProjectTsx(projectDir: string, scriptRel: string, args: string[] = []): number {
@@ -71,6 +71,31 @@ export function setupVenv(projectDir: string): void {
   }
 }
 
+/** Install Playwright + Chromium into the project (screen-record capability, on-demand). */
+export function setupBrowser(projectDir: string): void {
+  const npm = findOnPath(['npm']);
+  if (!npm) throw new UserError('npm not found on PATH', 'Install Node.js 20+ first.');
+  process.stderr.write(`${chalk.cyan('•')} installing playwright (devDependency) — needed only for screen recording\n`);
+  const launch = launchSpec(npm, ['install', '-D', 'playwright', '--no-fund', '--no-audit']);
+  const i = spawnSync(launch.command, launch.args, {
+    cwd: projectDir,
+    stdio: 'inherit',
+    windowsHide: true,
+    windowsVerbatimArguments: launch.windowsVerbatimArguments,
+  });
+  if (i.status !== 0) throw new UserError(`npm install -D playwright exited ${i.status ?? 'with an error'}`);
+  const cli = path.join(projectDir, 'node_modules', 'playwright', 'cli.js');
+  if (!fs.existsSync(cli)) throw new UserError('playwright did not install correctly (cli.js missing)');
+  process.stderr.write(`${chalk.cyan('•')} downloading the Chromium browser (one-time, ~150 MB)\n`);
+  const b = spawnSync(process.execPath, [cli, 'install', 'chromium'], {
+    cwd: projectDir,
+    stdio: 'inherit',
+    windowsHide: true,
+  });
+  if (b.status !== 0) throw new UserError(`playwright install chromium exited ${b.status ?? 'with an error'}`);
+  process.stderr.write(`${chalk.green('✓')} screen-record browser ready\n`);
+}
+
 export function registerSetupCommand(program: Command): void {
   program
     .command('setup')
@@ -86,6 +111,6 @@ export function registerSetupCommand(program: Command): void {
       }
       if (opts.ffmpeg) await setupFfmpeg(projectDir);
       if (opts.venv) setupVenv(projectDir);
-      if (opts.browser) notImplemented('setup --browser', 'V3', 'the Playwright browser provisioner');
+      if (opts.browser) setupBrowser(projectDir);
     });
 }

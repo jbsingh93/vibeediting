@@ -1,0 +1,28 @@
+{
+  "_comment": "YOUR brand — the single config boundary every component and engine reads. Edit it in the UI's Brand page, by hand, or ask the agent: 'interview me about my brand, then fill in brand/brand.json'. Ships neutral on purpose.",
+  "name": "My Brand",
+  "_name": "Shown in lower thirds / logo stings and read by the QA council's brand specialist.",
+  "colors": {
+    "_comment": "Hex colors. primary = background, secondary = main text, accent = highlights/CTA pills, muted = secondary text. Avoid greens near #00FF00 — that zone is reserved for green-screen keying (the components will warn).",
+    "primary": "#101014",
+    "secondary": "#FFFFFF",
+    "accent": "#4E9CFF",
+    "success": "#00C2A8",
+    "danger": "#FF4757",
+    "muted": "#888888"
+  },
+  "tone": {
+    "_comment": "How the agent writes your copy. register: casual | professional | playful. sellStyle: soft | neutral | direct — soft never hard-sells ('no BUY NOW banners'), direct is conversion-first. language: the language your videos speak (ISO 639-1: en, da, de, es...).",
+    "register": "professional",
+    "sellStyle": "neutral",
+    "language": "en"
+  },
+  "voice": {
+    "_comment": "ElevenLabs voice for AI voice-overs. Paste your own cloned voice ID, or pick a generic voice at https://elevenlabs.io/voices. INTENTIONALLY EMPTY until you set it — TTS will ask rather than guess.",
+    "elevenlabsVoiceId": ""
+  },
+  "brandWords": [],
+  "_brandWords": "Words unique to your brand (product names, slogans, your name). They get stripped from prompts sent to generators that must not echo them (e.g. Seedance).",
+  "logoPath": "",
+  "_logoPath": "Optional logo path inside public/ (e.g. public/brand/logo-light.svg). Used by LogoSting and the brand QA lens."
+}

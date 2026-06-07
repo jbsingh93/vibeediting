@@ -1,0 +1,13 @@
+{
+  "_comment": "JBS Vibe Editing project config — read by the vibe CLI, the UI server and the capability engines. VIBE:GENERATED {{VIBE_VERSION}}",
+  "agent": "auto",
+  "_agent": "Which agent CLI drives this project: auto | claude | codex. 'auto' picks Claude Code when installed, else Codex CLI.",
+  "uiPort": 7878,
+  "_uiPort": "Port for `vibe ui` (override per-run with --port or VIBE_UI_PORT).",
+  "language": "en",
+  "_language": "Default language for transcription hints and generated copy (ISO 639-1). Your brand/brand.json tone.language wins for copywriting.",
+  "maxRenderJobs": 1,
+  "_maxRenderJobs": "How many renders may run at once (GPU lane). Raise only if your GPU has headroom.",
+  "minFreeGb": 5,
+  "_minFreeGb": "Renders refuse to start when free disk falls below this (also VIBE_MIN_FREE_GB)."
+}

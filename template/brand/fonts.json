@@ -1,0 +1,16 @@
+{
+  "_comment": "Fonts + type scale for the components (read through <BrandContext>). The defaults — Inter for text, JetBrains Mono for code — are free, load everywhere, and cover latin-extended glyphs. Swap in your own families; keep fallbacks after the comma.",
+  "heading": "\"Inter\", \"Helvetica Neue\", Arial, sans-serif",
+  "body": "\"Inter\", \"Helvetica Neue\", Arial, sans-serif",
+  "mono": "\"JetBrains Mono\", \"Cascadia Code\", Consolas, monospace",
+  "weights": {
+    "_comment": "Numeric weights the components reference by role.",
+    "regular": 400,
+    "medium": 500,
+    "semibold": 600,
+    "bold": 700,
+    "black": 900
+  },
+  "scale": [16, 20, 25, 31, 39, 49, 61, 76, 95, 119],
+  "_scale": "Modular type scale (1.25 ratio) in px — pick sizes from here instead of inventing new ones."
+}

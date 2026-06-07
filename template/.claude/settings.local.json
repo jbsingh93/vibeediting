@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(remotion-best-practices)",
+      "Bash(npx tsc:*)",
+      "Bash(npx --package=typescript tsc:*)",
+      "Bash(npm install)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(npm test)",
+      "Bash(npx remotion:*)",
+      "Bash(npx tsx capabilities/:*)",
+      "Bash(tsx capabilities/:*)",
+      "Bash(ffprobe:*)"
+    ]
+  }
+}

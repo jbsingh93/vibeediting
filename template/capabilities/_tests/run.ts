@@ -39,6 +39,8 @@ async function main(): Promise<void> {
     './p2-orchestrate.test',
     // P3 — Remotion template-ization (timelines + Zod props + calculateMetadata + motion lib + GSAP + variants + alpha)
     './p3-templates.test',
+    // V3 — scaffold payload: base files + brand system + skills seed (template/scaffold both)
+    './v3-template.test',
     // P4V — AI VFX capability layer (router + paid wrappers + sanitizers + Aleph + compositor + color-match)
     './p4v-vfx.test',
   ];
