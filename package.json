@@ -51,6 +51,7 @@
     "@changesets/cli": "^2.31.0",
     "@eslint/js": "^9.39.0",
     "@gsap/react": "^2.1.2",
+    "@playwright/mcp": "^0.0.75",
     "@playwright/test": "^1.49.0",
     "@remotion/captions": "^4.0.461",
     "@remotion/paths": "^4.0.461",
