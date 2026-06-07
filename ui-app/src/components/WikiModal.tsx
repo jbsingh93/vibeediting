@@ -48,23 +48,37 @@ export function WikiModal({ projectId }: { projectId: string | null }) {
     return () => window.removeEventListener(WIKI_OPEN_EVENT, onOpen);
   }, []);
 
-  // fetch fresh on every open — CAPABILITIES.md is the live source of truth
+  // fetch fresh on every open — CAPABILITIES.md is the live source of truth. One transient
+  // transport hiccup ("TypeError: Failed to fetch" under socket churn — live-found on CI windows)
+  // must not brick the modal: retry once after a short backoff before surfacing the error, and
+  // the error state carries a manual retry (retryTick re-runs this effect).
+  const [retryTick, setRetryTick] = useState(0);
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    api
-      .wiki()
-      .then((r) => {
-        if (!alive) return;
-        setSections(r.sections);
-        setError(null);
-        setSelected((cur) => cur ?? r.sections[0]?.id ?? null);
-      })
-      .catch((e) => alive && setError(e instanceof ApiError ? e.message : String(e)));
+    const attempt = (retriesLeft: number) => {
+      api
+        .wiki()
+        .then((r) => {
+          if (!alive) return;
+          setSections(r.sections);
+          setError(null);
+          setSelected((cur) => cur ?? r.sections[0]?.id ?? null);
+        })
+        .catch((e) => {
+          if (!alive) return;
+          if (retriesLeft > 0) {
+            setTimeout(() => alive && attempt(retriesLeft - 1), 600);
+            return;
+          }
+          setError(e instanceof ApiError ? e.message : String(e));
+        });
+    };
+    attempt(1);
     return () => {
       alive = false;
     };
-  }, [open]);
+  }, [open, retryTick]);
 
   // Esc closes; focus trap per the UI-P5 pattern of record (CommandPalette)
   useEffect(() => {
@@ -169,7 +183,19 @@ export function WikiModal({ projectId }: { projectId: string | null }) {
         </div>
 
         {error && (
-          <div style={{ color: 'var(--danger)', fontSize: 13, padding: 16 }}>✕ {error}</div>
+          <div style={{ color: 'var(--danger)', fontSize: 13, padding: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+            ✕ {error}
+            <button
+              data-testid="wiki-retry"
+              onClick={() => {
+                setError(null);
+                setRetryTick((t) => t + 1);
+              }}
+              style={{ background: 'transparent', color: 'var(--secondary)', border: '1px solid var(--hairline)', borderRadius: 'var(--radius-sm)', padding: '4px 10px', fontSize: 12, cursor: 'pointer' }}
+            >
+              ↻ retry
+            </button>
+          </div>
         )}
         {!sections && !error && <div style={{ color: 'var(--muted)', fontSize: 13, padding: 16 }}>Loading…</div>}
 
