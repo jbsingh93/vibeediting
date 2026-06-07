@@ -49,9 +49,11 @@ test('P1F.2 download-media.py wires yt-dlp to the FULL ffmpeg build (dry-run)', 
   assert(!!m.yt_dlp, 'yt-dlp present');
   // THE COCKPIT CONTRACT: media must land where the Asset Manager lists (deliver/<p>/refs/) — the
   // server side adopted deliver/ at V4 while the engine still wrote test-video/, so acquired files
-  // were invisible in the UI (live-found by the V5d acquire walk).
-  const expectedDir = path.join(REPO_ROOT, 'deliver', '_tests', 'refs');
-  assertEqual(path.dirname(String(m.outtmpl)), expectedDir, 'yt-dlp outtmpl targets deliver/<p>/refs/');
+  // were invisible in the UI (live-found by the V5d acquire walk). Segment check, not exact-path
+  // equality: Python's Path.resolve() expands Windows 8.3 short paths (RUNNERA~1 on CI runners)
+  // while Node's path.resolve does not, so absolute prefixes can't be compared across the two.
+  const normDir = String(m.outtmpl).split(/[\\/]/).slice(-4, -1).join('/').toLowerCase();
+  assertEqual(normDir, 'deliver/_tests/refs', `yt-dlp outtmpl targets deliver/<p>/refs/ — got ${m.outtmpl}`);
 });
 
 test('P1F.5 refsDir routes ship→public/<p>/refs and reference→deliver/<p>/refs (the cockpit trees)', () => {
