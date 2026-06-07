@@ -14,8 +14,9 @@ export default tseslint.config(
     },
   },
   {
-    // Plain-JS Node helpers + the E2E fixture (run under the node binary, not the TS toolchain).
-    files: ['tests/helpers/**/*.mjs', 'tests/e2e/**/*.mjs'],
+    // Plain-JS Node helpers + the E2E fixture + the Proof-D driver (run under the node binary,
+    // not the TS toolchain).
+    files: ['tests/helpers/**/*.mjs', 'tests/e2e/**/*.mjs', 'tests/proofs/**/*.mjs'],
     languageOptions: { globals: globals.node },
     rules: {
       // the mock strips a UTF-8 BOM with a literal BOM char in a regex — intentional
