@@ -158,14 +158,19 @@ describe.skipIf(!ENABLED)('V3.6 killer integration: init → suite → lint → 
         expect(jobId).toBeTruthy();
 
         const deadline = Date.now() + 8 * 60 * 1000;
-        let job: { status: string; progress?: number; error?: string } = { status: 'queued' };
+        let job: { status: string; progress?: number; error?: string; logTail?: string[] } = {
+          status: 'queued',
+        };
         while (Date.now() < deadline) {
           const r = await app.inject({ method: 'GET', url: `/api/jobs/${jobId}` });
           job = (r.json() as { job: typeof job }).job;
           if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') break;
           await new Promise((resolve) => setTimeout(resolve, 2000));
         }
-        expect(job.status, `ui render job ended ${job.status}: ${job.error ?? ''}`).toBe('done');
+        expect(
+          job.status,
+          `ui render job ended ${job.status}: ${job.error ?? ''}\n--- job logTail ---\n${(job.logTail ?? []).slice(-40).join('\n')}`,
+        ).toBe('done');
         const uiSmoke = path.join(target, 'out', 'e2e-proof', 'ui-smoke.mp4');
         expect(existsSync(uiSmoke)).toBe(true);
         expect(readFileSync(uiSmoke).length).toBeGreaterThan(10_000);
