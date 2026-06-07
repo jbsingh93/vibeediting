@@ -1,0 +1,98 @@
+# Proof D — Proof A's full pipeline on REAL Apple-silicon macOS hardware (V5.4, R-A residual).
+#
+# Manually triggered ONLY (it spends real money): a real Claude Code drives the cockpit via
+# ANTHROPIC_API_KEY, Whisper + Gemini run on real keys, the render exercises the arm64
+# HEVC/VideoToolbox path. The talking clip is SYNTHESIZED on the runner (macOS `say` + the
+# project's own provisioned ffmpeg) — no real media in the repo.
+#
+# Required repo secrets: ANTHROPIC_API_KEY · OPENAI_API_KEY · GEMINI_API_KEY
+# Rough spend per run: a few $ of Claude API (2–3 long agent turns) + cents of Whisper/Gemini.
+name: proof-d
+
+on:
+  workflow_dispatch:
+
+jobs:
+  proof-d:
+    runs-on: macos-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build, pack and install the tarball (the user-sim boundary)
+        run: |
+          npm ci
+          npm run build
+          npm run ui:build
+          npm pack
+          npm i -g ./vibeediting-*.tgz
+          npm i -g @anthropic-ai/claude-code
+          vibe --version
+          claude --version
+
+      - name: Scaffold the workspace (real npm install + arch-aware ffmpeg provision)
+        run: |
+          mkdir -p "$HOME/proof-d-home"
+          cd "$HOME/proof-d-home"
+          vibe init proof-d --yes --no-venv --no-ui
+
+      - name: Provider keys into the workspace .env (never echoed)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          WS="$HOME/proof-d-home/proof-d"
+          printf 'OPENAI_API_KEY=%s\nGEMINI_API_KEY=%s\nELEVENLABS_API_KEY=\nRUNWAY_API_SECRET=\nFAL_KEY=\n' "$OPENAI_API_KEY" "$GEMINI_API_KEY" > "$WS/.env"
+
+      - name: Synthesize the talking HEVC clip (say + provisioned ffmpeg, VideoToolbox first)
+        run: |
+          WS="$HOME/proof-d-home/proof-d"
+          FF="$WS/.vibe/bin/ffmpeg"
+          say -o /tmp/vo.aiff "I built an A I tool that edits videos, like this one. It transcribes the words, plans the scenes, renders the cut, and ships the final file, all by itself. Follow along to see how."
+          if "$FF" -hide_banner -encoders | grep -q hevc_videotoolbox; then VENC=hevc_videotoolbox; EXTRA="-b:v 4M";
+          elif "$FF" -hide_banner -encoders | grep -q libx265; then VENC=libx265; EXTRA="-crf 24";
+          else VENC=libx264; EXTRA="-crf 20"; echo "::warning::no HEVC encoder on this runner — falling back to h264"; fi
+          echo "video encoder: $VENC"
+          "$FF" -y -loglevel error -f lavfi -i "testsrc2=size=1080x1920:rate=30" -i /tmp/vo.aiff \
+            -t 12 -c:v "$VENC" $EXTRA -tag:v hvc1 -pix_fmt yuv420p -c:a aac -shortest /tmp/proof-d-clip.mp4
+          "$WS/.vibe/bin/ffprobe" -v error -show_entries stream=codec_name -of csv=p=0 /tmp/proof-d-clip.mp4
+
+      - name: Start vibe ui
+        env:
+          VIBE_UI_NO_OPEN: '1'
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          cd "$HOME/proof-d-home/proof-d"
+          nohup vibe ui --port 7878 > /tmp/vibe-ui.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:7878/api/projects && break || sleep 2; done
+
+      - name: Install the driver browser
+        run: npx playwright install chromium
+
+      - name: Run the Proof D driver (real claude · real keys · real render)
+        run: |
+          PROOF_WS="$HOME/proof-d-home/proof-d" \
+          PROOF_BASE=http://127.0.0.1:7878 \
+          PROOF_CLIP=/tmp/proof-d-clip.mp4 \
+          PROOF_SHOTS=proof-d-shots \
+          node tests/proofs/proof-d-driver.mjs
+
+      - name: Collect the deliverable
+        if: always()
+        run: |
+          mkdir -p proof-d-artifacts
+          cp -R proof-d-shots proof-d-artifacts/ 2>/dev/null || true
+          find "$HOME/proof-d-home/proof-d/deliver" "$HOME/proof-d-home/proof-d/out" -name '*loudnorm*.mp4' -exec cp {} proof-d-artifacts/ \; 2>/dev/null || true
+          cp /tmp/vibe-ui.log proof-d-artifacts/ 2>/dev/null || true
+          ls -la proof-d-artifacts
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: proof-d-evidence
+          path: proof-d-artifacts/
+          if-no-files-found: warn
