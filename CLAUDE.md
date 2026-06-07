@@ -45,6 +45,22 @@ npm run lint         # eslint flat config
    headless render engine in the scaffolded project.
 7. Tests travel with code; a phase isn't done until its gate (doc 10) passes.
 
+## Verification — live user-simulation smoke is mandatory
+
+Typecheck + build + unit tests are necessary but **not sufficient**. Before closing any phase-gate
+row, and after every meaningful change to `src/` or `template/`, also verify the way a real user
+experiences the tool (DEV-DOCS doc 12 is the authoritative reference, incl. the test-folder path):
+
+1. `npm run build; npm pack; npm i -g .\vibeediting-<version>.tgz` — install from the **tarball**
+   (never `npm link` / `npm run dev` for this purpose: only the tarball crosses the real `files`
+   publish boundary, so packaging bugs surface here instead of after release).
+2. Run the installed `vibe` (`doctor`, `init`, `ui`, …) from the **external test folder** defined
+   in DEV-DOCS doc 12 — **never from this repo** (scaffold pollution, project-mount confusion,
+   dev-tree paths masking what actually shipped). The path stays out of this file by hard rule 2.
+3. UI surfaces additionally get a **live Playwright (MCP) walk** against the real `vibe ui` server
+   on a project scaffolded in that test folder from the installed tarball — clicks, forms, agent
+   stream, screenshots; findings triaged to `DEV-DOCS/notes/live-qa/`. Blockers/majors block the row.
+
 ## Layout
 
 - `bin/vibe.ts` → `src/cli.ts` (commander dispatcher) → `src/commands/*`

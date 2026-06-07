@@ -6,6 +6,7 @@ node_modules/
 dist/
 *.log
 *.tsbuildinfo
+*.tgz
 
 # NOTE: ui-dist/ is intentionally NOT ignored — the prebuilt UI client is
 # committed and shipped in the npm package (aabclitool pattern).
