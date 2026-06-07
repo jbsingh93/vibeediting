@@ -10,6 +10,7 @@ import { ARGV_LOG } from '../../playwright.config.js';
  * (turn 2's argv carries --resume in the argv log).
  */
 test('agent: message → activity + bubble + live stage flip; turn 2 resumes', async ({ page }) => {
+  test.setTimeout(60_000); // two mock turns + chokidar latency — slow CI runners need headroom
   const guard = attachConsoleGuard(page);
 
   await page.goto('/#/project/e2e-agent');
@@ -25,9 +26,11 @@ test('agent: message → activity + bubble + live stage flip; turn 2 resumes', a
   // the activity row carries the capability + a glyph
   const activity = page.locator('[data-activity="ingest/transcribe"]');
   await expect(activity).toBeVisible();
-  // the agent's manifest edit propagates live to the stage strip (watcher → /ws/manifests), no reload
+  // the agent's manifest edit propagates live to the stage strip (watcher → /ws/manifests), no
+  // reload. Generous timeout: the path is mock-turn → atomic manifest rename → chokidar (mac fs
+  // events can lag seconds on CI runners) → WS broadcast — flaked once at 10s on a mac runner.
   await expect(page.locator('[data-stage="ingest"]')).toHaveAttribute('data-stage-status', 'complete', {
-    timeout: 10_000,
+    timeout: 25_000,
   });
 
   // turn 2 → the server passes --resume → the mock acknowledges + the argv log records it
