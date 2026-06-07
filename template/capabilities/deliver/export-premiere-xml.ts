@@ -396,4 +396,7 @@ async function main(): Promise<void> {
   });
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename)) void main();
+// Symlink-safe main-guard: macOS tmp/cwd paths can reach the same file via /var → /private/var,
+// so a plain path.resolve comparison misses (live-found on Apple-silicon CI at GATE V3).
+const realpathSafe = (p: string): string => { try { return fs.realpathSync(path.resolve(p)); } catch { return path.resolve(p); } };
+if (process.argv[1] && realpathSafe(process.argv[1]) === realpathSafe(__filename)) void main();

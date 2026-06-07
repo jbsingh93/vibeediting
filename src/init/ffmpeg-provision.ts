@@ -52,14 +52,19 @@ export function pickSource(platform = process.platform, arch = process.arch): Ff
         kind: 'zip',
         host: 'gyan.dev',
       };
-    case 'darwin':
-      // evermeet.cx static builds (x64; run fine on arm64 under Rosetta). ffprobe is separate.
+    case 'darwin': {
+      // martin-riedl.de static builds — ARCH-AWARE (arm64 native + amd64), ffmpeg/ffprobe as
+      // separate zips, stable redirect API. Replaced evermeet.cx at V3: its x86_64-only build
+      // left ffprobe unrunnable on Apple-silicon CI (live-found at GATE V3). No checksum
+      // sidecar published — the post-install `-version` + capability probe gate instead.
+      const a = arch === 'arm64' ? 'arm64' : 'amd64';
       return {
-        url: 'https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip',
-        ffprobeUrl: 'https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip',
+        url: `https://ffmpeg.martin-riedl.de/redirect/latest/macos/${a}/release/ffmpeg.zip`,
+        ffprobeUrl: `https://ffmpeg.martin-riedl.de/redirect/latest/macos/${a}/release/ffprobe.zip`,
         kind: 'zip',
-        host: 'evermeet.cx',
+        host: 'ffmpeg.martin-riedl.de',
       };
+    }
     default: {
       const a = arch === 'arm64' ? 'arm64' : 'amd64';
       return {
@@ -205,15 +210,24 @@ export async function provisionFfmpeg(projectDir: string, onProgress?: Provision
     }
     onProgress?.('install', binDir);
 
-    const ffmpegPath = path.join(binDir, `ffmpeg${exe}`);
-    const ver = spawnSync(ffmpegPath, ['-hide_banner', '-version'], { encoding: 'utf8', windowsHide: true });
-    if (ver.status !== 0) {
-      throw new ContractError(`provisioned ffmpeg does not run (exit ${ver.status ?? 'spawn-error'})`, 'Your platform may need a different build — install ffmpeg yourself and set VIBE_FFMPEG.');
+    // BOTH binaries must run — ffprobe broke independently on Apple-silicon CI at V3
+    // (arch-mismatched build), so a single ffmpeg check is not enough.
+    let version = 'unknown';
+    for (const w of wanted) {
+      const binPath = path.join(binDir, w);
+      const ver = spawnSync(binPath, ['-hide_banner', '-version'], { encoding: 'utf8', windowsHide: true });
+      if (ver.status !== 0) {
+        const reason = ver.error ? ver.error.message : `exit ${ver.status ?? 'unknown'}`;
+        throw new ContractError(
+          `provisioned ${w} does not run (${reason})`,
+          'Your platform may need a different build — install ffmpeg yourself and set VIBE_FFMPEG.',
+        );
+      }
+      if (w.startsWith('ffmpeg')) version = (ver.stdout ?? '').split('\n')[0]?.trim() ?? 'unknown';
     }
-    const version = (ver.stdout ?? '').split('\n')[0]?.trim() ?? 'unknown';
     onProgress?.('done', version);
 
-    return { ffmpeg: ffmpegPath, ffprobe: path.join(binDir, `ffprobe${exe}`), version, host: src.host, checksum };
+    return { ffmpeg: path.join(binDir, `ffmpeg${exe}`), ffprobe: path.join(binDir, `ffprobe${exe}`), version, host: src.host, checksum };
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }

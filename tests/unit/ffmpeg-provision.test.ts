@@ -20,11 +20,16 @@ describe('pickSource', () => {
     expect(s.checksumUrl).toContain('.sha256');
   });
 
-  it('selects evermeet with a separate ffprobe archive on darwin', () => {
-    const s = pickSource('darwin', 'arm64');
-    expect(s.host).toBe('evermeet.cx');
-    expect(s.ffprobeUrl).toBeTruthy();
-    expect(s.kind).toBe('zip');
+  it('selects ARCH-AWARE martin-riedl builds with a separate ffprobe archive on darwin', () => {
+    // evermeet.cx was x86_64-only → ffprobe unrunnable on Apple-silicon CI (live-found, GATE V3).
+    const arm = pickSource('darwin', 'arm64');
+    expect(arm.host).toBe('ffmpeg.martin-riedl.de');
+    expect(arm.url).toContain('/macos/arm64/');
+    expect(arm.ffprobeUrl).toContain('/macos/arm64/');
+    expect(arm.kind).toBe('zip');
+    const x64 = pickSource('darwin', 'x64');
+    expect(x64.url).toContain('/macos/amd64/');
+    expect(x64.ffprobeUrl).toContain('/macos/amd64/');
   });
 
   it('selects johnvansickle tar.xz with arch mapping on linux', () => {

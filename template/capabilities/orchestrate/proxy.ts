@@ -15,6 +15,7 @@
  * CLI:
  *   tsx proxy.ts --in VIDEO [--height 480] [--fps N] [--out PATH] [--project NAME]
  */
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { requireInputFile, run, runCapability, workDir } from '../_env/contract';
 import { resolveFfmpeg } from '../_env/ffmpeg';
@@ -80,4 +81,7 @@ async function main(): Promise<void> {
   });
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename)) void main();
+// Symlink-safe main-guard: macOS tmp/cwd paths can reach the same file via /var → /private/var,
+// so a plain path.resolve comparison misses (live-found on Apple-silicon CI at GATE V3).
+const realpathSafe = (p: string): string => { try { return fs.realpathSync(path.resolve(p)); } catch { return path.resolve(p); } };
+if (process.argv[1] && realpathSafe(process.argv[1]) === realpathSafe(__filename)) void main();

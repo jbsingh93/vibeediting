@@ -26,9 +26,12 @@ const ENABLED = process.env.VIBE_SCAFFOLD_E2E === '1';
 const TWENTY_MIN = 20 * 60 * 1000;
 
 let cwd: string | undefined;
+// Deleting a full scaffold (node_modules + venv) beats vitest's 10s default hook timeout
+// on CI disks — give cleanup five minutes (live-found: the windows run PASSED its test and
+// then failed on this hook).
 afterAll(() => {
   if (cwd && !process.env.VIBE_SCAFFOLD_E2E_KEEP) rmSync(cwd, { recursive: true, force: true });
-});
+}, 5 * 60 * 1000);
 
 function runInProject(projectDir: string, bin: string, args: string[]): { status: number; out: string } {
   const launch = launchSpec(bin, args);
@@ -61,12 +64,21 @@ describe.skipIf(!ENABLED)('V3.6 killer integration: init → suite → lint → 
       });
       expect(existsSync(path.join(target, 'node_modules', 'tsx', 'dist', 'cli.mjs'))).toBe(true);
 
+      // Surface what init recorded — invaluable when a CI platform misbehaves.
+      const state = JSON.parse(readFileSync(path.join(target, '.vibe', 'state.json'), 'utf8'));
+      process.stdout.write(`[scaffold-e2e] provision: ${JSON.stringify(state.provision)}\n`);
+
       const npm = findOnPath(['npm'])!;
       expect(npm).toBeTruthy();
 
       // ── the scaffold's own capability suite (the 187-check gate) ─────────
       const suite = runInProject(target, npm, ['test']);
-      expect(suite.status, `scaffold suite failed:\n${suite.out.slice(-8000)}`).toBe(0);
+      const failures = suite.out
+        .split('\n')
+        .filter((l) => /✗|×|Error|failed/.test(l))
+        .slice(0, 50)
+        .join('\n');
+      expect(suite.status, `scaffold suite failed (status ${suite.status}):\n${failures}\n--- tail ---\n${suite.out.slice(-3000)}`).toBe(0);
 
       // ── strict typecheck inside the scaffold ─────────────────────────────
       const lint = runInProject(target, npm, ['run', 'lint']);

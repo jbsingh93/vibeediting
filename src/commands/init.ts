@@ -172,9 +172,11 @@ export async function initProject(opts: InitOptions): Promise<string> {
     );
   }
   if (wantVenv) {
+    step('setting up the optional Python toolkit (venv — audio mastering, beat/VAD, yt-dlp)');
     try {
       setupVenv(targetDir);
       provision.venv = 'created';
+      ok('Python toolkit ready');
     } catch (e) {
       provision.venv = 'failed';
       warn(`${e instanceof Error ? e.message : e} — run \`vibe setup --venv\` any time`);

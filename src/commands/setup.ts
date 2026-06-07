@@ -27,6 +27,11 @@ function runProjectTsx(projectDir: string, scriptRel: string, args: string[] = [
     stdio: 'inherit',
     windowsHide: true,
   });
+  // A spawn-level failure has no exit code — surface the reason instead of a silent "1"
+  // (a silent variant of this cost a CI-debugging round at GATE V3).
+  if (r.error) {
+    process.stderr.write(`${chalk.yellow('•')} ${scriptRel} could not start: ${r.error.message}\n`);
+  }
   return r.status ?? 1;
 }
 

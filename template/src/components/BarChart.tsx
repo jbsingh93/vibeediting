@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AbsoluteFill,
   useCurrentFrame,
@@ -11,7 +11,7 @@ import { useBrand } from './BrandContext';
  * Animated horizontal bar chart.
  * Bars grow from left with stagger; values count up synchronized.
  *
- * Per-bar `color` is optional â€” omit it to fall back to the brand accent. Pass an
+ * Per-bar `color` is optional — omit it to fall back to the brand accent. Pass an
  * explicit hex only when you deliberately want an off-brand bar.
  *
  * Usage:
@@ -21,7 +21,7 @@ import { useBrand } from './BrandContext';
  *       { label: 'South',  value: 850 },
  *     ]}
  *     max={1500}
- *     title="Sales per region â€” 2026"
+ *     title="Sales per region — 2026"
  *   />
  */
 
