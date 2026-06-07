@@ -53,6 +53,8 @@ async function main(): Promise<void> {
     './p4v-vfx.test',
     // P4W — the VFX executable layer LIVE: Reinhard color transfer (image/video/EMA) + ffmpeg compositor
     './p4w-vfx-exec.test',
+    // VT.1 — acquire network tools LIVE against a local fixture HTTP server (doc 13 §3) + setup-venv no-op
+    './vt1-acquire-http.test',
   ];
   if (process.argv.includes('--render')) {
     files.push('./p0-render.test'); // demo-comp still render
