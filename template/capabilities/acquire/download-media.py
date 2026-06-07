@@ -3,8 +3,9 @@
 
 Downloads video/audio (+ subtitles + thumbnail + *.info.json) from any yt-dlp-supported site (YouTube/
 Vimeo/TikTok/Instagram/X/...), MERGED with the full C:\\ffmpeg build (so high-res video+audio mux works).
-Reference media lands in test-video/<project>/refs/ (gitignored). Provenance is appended to the same
-acquire provenance.json the TS acquire capabilities write.
+Reference media lands in deliver/<project>/refs/ (media gitignored by extension; sidecars tracked) —
+the tree the cockpit Asset Manager lists and the renders list explicitly skips. Provenance is appended
+to the same acquire provenance.json the TS acquire capabilities write.
 
 This reuses the ai-brain `ingest_youtube.py` yt-dlp ENGINE — but the output contract differs: we KEEP the
 media bytes in the project for compositing (the ai-brain skill deletes them after making a wiki dossier).
@@ -56,7 +57,7 @@ def build_opts(a: argparse.Namespace, refs_dir: Path) -> dict:
 def run(a: argparse.Namespace) -> dict:
     if not a.url:
         raise ValueError("missing --url")
-    refs_dir = contract.REPO_ROOT / "test-video" / a.project / "refs"
+    refs_dir = contract.REPO_ROOT / "deliver" / a.project / "refs"
     refs_dir.mkdir(parents=True, exist_ok=True)
     opts = build_opts(a, refs_dir)
 

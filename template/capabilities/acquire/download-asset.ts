@@ -3,8 +3,8 @@
  * capabilities/acquire/download-asset.ts — direct binary fetch by URL (plan P1F.3, GAP-48).
  *
  * Pulls an image/video/audio/font/LUT by URL with sha256 + content-type/extension validation + a size
- * guard + provenance. Lands in public/<project>/refs/ (assets meant to SHIP) or test-video/<project>/refs/
- * (working/reference). The latter is gitignored media.
+ * guard + provenance. Lands in public/<project>/refs/ (assets meant to SHIP) or deliver/<project>/refs/
+ * (working/reference — the tree the cockpit Asset Manager lists; media gitignored by extension).
  *
  * CLI: tsx download-asset.ts --url URL --project NAME [--ship] [--out FILE] [--max-mb 200]
  */
@@ -33,6 +33,14 @@ export function sha256(buf: Buffer): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
+/** Where an acquired asset lands (pure → testable): SHIP → public/<p>/refs/ (staticFile root);
+ *  reference → deliver/<p>/refs/ — the tree the cockpit Asset Manager lists (and listRenders skips). */
+export function refsDir(project: string, ship: boolean): string {
+  return ship
+    ? path.join(REPO_ROOT, 'public', project, 'refs')
+    : path.join(REPO_ROOT, 'deliver', project, 'refs');
+}
+
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -54,9 +62,7 @@ async function main(): Promise<void> {
     if (mb > maxMb) throw new Error(`asset is ${mb.toFixed(1)} MB > --max-mb ${maxMb}`);
 
     const filename = path.basename(arg('out') ?? chooseFilename(url, res.headers.get('content-type')));
-    const baseDir = ship
-      ? path.join(REPO_ROOT, 'public', project, 'refs')
-      : path.join(REPO_ROOT, 'test-video', project, 'refs');
+    const baseDir = refsDir(project, ship);
     fs.mkdirSync(baseDir, { recursive: true });
     const outPath = path.join(baseDir, filename);
     fs.writeFileSync(outPath, buf);

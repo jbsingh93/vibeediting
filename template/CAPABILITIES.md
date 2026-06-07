@@ -164,8 +164,8 @@ swipe-feed ignores custom thumbs).
 | File | Purpose | Invoke | Limits |
 |---|---|---|---|
 | `fetch-url.ts` | page → readable **Markdown** + media URLs + provenance (pure regex, no deps) | `tsx capabilities/acquire/fetch-url.ts --url URL [--project] [--out]` | **no JS rendering** (escalate to agent `WebFetch`); no deep crawl |
-| `download-media.py` | **yt-dlp** video/audio + subs + thumb + `.info.json`, merged via full ffmpeg | `python capabilities/acquire/download-media.py --url URL --project N [--audio-only] [--format] [--subs en,..] [--cookies] [--dry-run]` | network-dependent; keeps media (lands in `test-video/<project>/refs/`); yt-dlp loosely pinned; needs the optional venv |
-| `download-asset.ts` | direct binary fetch (img/video/audio/font/LUT) + sha256 + size guard | `tsx capabilities/acquire/download-asset.ts --url URL --project N [--ship] [--out] [--max-mb 200]` | single file; in-memory; 200 MB default cap; `--ship` → `public/<project>/refs/` else gitignored |
+| `download-media.py` | **yt-dlp** video/audio + subs + thumb + `.info.json`, merged via full ffmpeg | `python capabilities/acquire/download-media.py --url URL --project N [--audio-only] [--format] [--subs en,..] [--cookies] [--dry-run]` | network-dependent; keeps media (lands in `deliver/<project>/refs/` — the cockpit Asset Manager tree); yt-dlp loosely pinned; needs the optional venv |
+| `download-asset.ts` | direct binary fetch (img/video/audio/font/LUT) + sha256 + size guard | `tsx capabilities/acquire/download-asset.ts --url URL --project N [--ship] [--out] [--max-mb 200]` | single file; in-memory; 200 MB default cap; `--ship` → `public/<project>/refs/` else `deliver/<project>/refs/` (media gitignored) |
 | `provenance.ts` | append-only `provenance.json` per project | library | append-only, no concurrency lock |
 
 ---

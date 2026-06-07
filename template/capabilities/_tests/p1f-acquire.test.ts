@@ -3,8 +3,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { test, assert, assertEqual } from './harness';
 import { lastEnvelope, runPy } from './fixtures';
+import { REPO_ROOT } from '../_env/contract';
 import { htmlToMarkdown } from '../acquire/fetch-url';
-import { chooseFilename, sha256 } from '../acquire/download-asset';
+import { chooseFilename, refsDir, sha256 } from '../acquire/download-asset';
 import { acquireProvenancePath, appendAcquireRecord } from '../acquire/provenance';
 
 test('P1F.1 htmlToMarkdown extracts title, text, and embedded media URLs', () => {
@@ -46,4 +47,14 @@ test('P1F.2 download-media.py wires yt-dlp to the FULL ffmpeg build (dry-run)', 
   const ffmpegBin = path.join(String(m.ffmpeg_location), process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
   assert(fs.existsSync(ffmpegBin), `merges with the full ffmpeg (no binary at ${ffmpegBin})`);
   assert(!!m.yt_dlp, 'yt-dlp present');
+  // THE COCKPIT CONTRACT: media must land where the Asset Manager lists (deliver/<p>/refs/) — the
+  // server side adopted deliver/ at V4 while the engine still wrote test-video/, so acquired files
+  // were invisible in the UI (live-found by the V5d acquire walk).
+  const expectedDir = path.join(REPO_ROOT, 'deliver', '_tests', 'refs');
+  assertEqual(path.dirname(String(m.outtmpl)), expectedDir, 'yt-dlp outtmpl targets deliver/<p>/refs/');
+});
+
+test('P1F.5 refsDir routes ship→public/<p>/refs and reference→deliver/<p>/refs (the cockpit trees)', () => {
+  assertEqual(refsDir('_tests', true), path.join(REPO_ROOT, 'public', '_tests', 'refs'), 'ship tree');
+  assertEqual(refsDir('_tests', false), path.join(REPO_ROOT, 'deliver', '_tests', 'refs'), 'reference tree');
 });

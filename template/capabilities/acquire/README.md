@@ -15,8 +15,8 @@ summaries and delete the media, **we keep the media and emit editing-ready outpu
 | File | Purpose |
 |---|---|
 | `fetch-url.ts` ✅ | Page → readable **text** (Markdown: title, body, enumerated media URLs resolved vs base). Node `fetch` + pure `htmlToMarkdown()`; **escalate to the agent's `WebFetch`** for JS-heavy/blocked pages. → `out/work/<project>/acquire/<slug>.md` + provenance. |
-| `download-media.py` ✅ | **`yt-dlp`** (venv): video/audio + subs + thumbnail + `*.info.json`; **merges with the full ffmpeg** via `ffmpeg_location`; `--cookies`, `--audio-only`, `--dry-run`. → `test-video/<project>/refs/` + provenance. |
-| `download-asset.ts` ✅ | Direct binary fetch (image/video/audio/font/LUT); sha256 + content-type→ext fallback + `--max-mb`. → `public/<project>/refs/` (`--ship`) or `test-video/<project>/refs/`. |
+| `download-media.py` ✅ | **`yt-dlp`** (venv): video/audio + subs + thumbnail + `*.info.json`; **merges with the full ffmpeg** via `ffmpeg_location`; `--cookies`, `--audio-only`, `--dry-run`. → `deliver/<project>/refs/` + provenance (the tree the cockpit Asset Manager lists). |
+| `download-asset.ts` ✅ | Direct binary fetch (image/video/audio/font/LUT); sha256 + content-type→ext fallback + `--max-mb`. → `public/<project>/refs/` (`--ship`) or `deliver/<project>/refs/`. |
 | `provenance.ts` ✅ | `provenance.json` array — `{sourceUrl, title, author, fetchedAt, sha256, bytes, tool}`; TS + Python acquire both append here. Feeds the manifest. |
 | `gallery-dl` (opt, on-demand) | Set/board/profile scrapes (moodboards). |
 
