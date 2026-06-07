@@ -13,7 +13,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { projectDir } from './context.js';
-import { runAgentTurn } from './agent-bridge.js';
+import { runAgentTurn, broadcastAgentEvent } from './agent-bridge.js';
 import { isAgentBusy } from '../agent/runner.js';
 
 export interface StyleInfo {
@@ -93,17 +93,51 @@ export function listTemplateStyles(dir: string = projectDir()): StyleInfo[] {
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,48}$/;
 
+/**
+ * Where the headless cockpit agent STAGES the distilled skill. The cockpit agent cannot write into
+ * `.claude/` (Claude Code gates `.claude/` writes even under acceptEdits — live-found VT.4 F16), so it
+ * writes here (out/work is freely writable) and the server finalizes it into `.claude/skills/` on the
+ * `done` event (server process has full fs access, no permission gate).
+ */
+export function stagedSkillDir(project: string, slug: string): string {
+  return path.join(projectDir(), 'out', 'work', project, 'distill', slug);
+}
+
+/**
+ * Finalize a distilled skill the cockpit agent staged: copy out/work/<p>/distill/<slug>/ →
+ * .claude/skills/<slug>/ (incl. any references/). Never clobbers an existing user skill. Returns
+ * whether it placed a SKILL.md. Pure-ish (fs only) — unit-tested.
+ */
+export function finalizeDistilledSkill(
+  baseDir: string,
+  project: string,
+  slug: string,
+): { placed: boolean; reason?: string } {
+  const staged = path.join(baseDir, 'out', 'work', project, 'distill', slug);
+  const stagedSkill = path.join(staged, 'SKILL.md');
+  const target = path.join(baseDir, '.claude', 'skills', slug);
+  if (!fs.existsSync(stagedSkill)) return { placed: false, reason: 'no staged SKILL.md' };
+  if (fs.existsSync(path.join(target, 'SKILL.md'))) return { placed: false, reason: 'target already exists' };
+  fs.mkdirSync(target, { recursive: true });
+  fs.cpSync(staged, target, { recursive: true });
+  return { placed: true };
+}
+
 /** The distill prompt — routes through the shipped template-distiller skill (doc 07 §10). */
 export function distillPrompt(project: string, slug: string, source: 'project' | 'chat'): string {
   const from =
     source === 'chat'
       ? `the agent conversation of project "${project}" (projects/${project}/chat.jsonl — the corrections are the gold)`
       : `the finished project "${project}" (its manifest, provenance, composition code, captions/audio-mix/props sidecars and chat)`;
+  // Stage under out/work — the cockpit finalizes into .claude/skills/ (F16: the headless agent cannot
+  // write into .claude/). Path is RELATIVE to the project root (the agent's cwd).
+  const stagedRel = `out/work/${project}/distill/${slug}/SKILL.md`;
   return (
     `Use the template-distiller skill to distill ${from} into a reusable style skill named ` +
-    `"${slug}". Write .claude/skills/${slug}/SKILL.md with the required vibe-style frontmatter ` +
-    `(vibe-style: true, vibe-style-label, vibe-style-hint, vibe-style-formats) — patterns and ` +
-    `rules only, never content from the source project. When done, confirm what the style encodes.`
+    `"${slug}". Write the skill to ${stagedRel} (NOT into .claude/ — the cockpit will place it there ` +
+    `for you) with the required vibe-style frontmatter (vibe-style: true, vibe-style-label, ` +
+    `vibe-style-hint, vibe-style-formats) — patterns and rules only, never content from the source ` +
+    `project. Put any long references/ next to that SKILL.md. When done, confirm what the style encodes.`
   );
 }
 
@@ -134,8 +168,19 @@ export function registerStylesRoutes(app: FastifyInstance): void {
     }
     // Fire-and-return: the turn persists to projects/<p>/chat.jsonl (adapter-side), so the
     // cockpit feed shows the distillation live; the wizard re-fetches /api/styles after.
-    void runAgentTurn(project, distillPrompt(project, slug, source), () => {
-      /* events land in the transcript; sockets replay via GET /:id/chat */
+    // On `done`, finalize the staged skill into .claude/skills/ (F16 — the headless agent can't write
+    // there itself). Idempotent + never clobbers an existing user skill.
+    void runAgentTurn(project, distillPrompt(project, slug, source), (e) => {
+      // Stream the server-started turn to any feed watching this project (F18 — the "watch the
+      // agent feed" hint now shows the distillation live, not just after a reload).
+      broadcastAgentEvent(project, e);
+      if (e.type === 'done') {
+        try {
+          finalizeDistilledSkill(projectDir(), project, slug);
+        } catch {
+          /* leave the staged copy in out/work/ for manual placement; non-fatal */
+        }
+      }
     });
     return reply.code(202).send({ started: true, slug });
   });

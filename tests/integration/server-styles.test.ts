@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../src/server/index.js';
 import { readChat } from '../../src/agent/chat.js';
 import { makeTempVibeProject, MOCK_AGENT, type TempVibeProject } from '../helpers/temp-vibe-project.js';
+import { finalizeDistilledSkill, distillPrompt } from '../../src/server/styles-routes.js';
 
 let app: FastifyInstance;
 let tmp: TempVibeProject;
@@ -127,5 +128,44 @@ describe('POST /api/templates/distill', () => {
       await new Promise((r) => setTimeout(r, 100));
     }
     expect(found).toBe(true);
+  });
+});
+
+describe('finalizeDistilledSkill (F16 — cockpit places what the headless agent staged)', () => {
+  function stage(slug: string, body: string, refs?: Record<string, string>): void {
+    const dir = path.join(tmp.dir, 'out', 'work', 'p', 'distill', slug);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), body, 'utf8');
+    if (refs) {
+      fs.mkdirSync(path.join(dir, 'references'), { recursive: true });
+      for (const [name, content] of Object.entries(refs)) fs.writeFileSync(path.join(dir, 'references', name), content, 'utf8');
+    }
+  }
+
+  it('the distill prompt stages under out/work (never tells the agent to write .claude/)', () => {
+    const p = distillPrompt('p', 'my-style', 'project');
+    expect(p).toContain('out/work/p/distill/my-style/SKILL.md');
+    expect(p).not.toMatch(/Write \.claude\/skills/);
+  });
+
+  it('copies a staged skill (+ references) into .claude/skills/', () => {
+    stage('my-style', '---\nvibe-style: true\n---\nbody', { 'pacing.md': 'beats' });
+    const r = finalizeDistilledSkill(tmp.dir, 'p', 'my-style');
+    expect(r.placed).toBe(true);
+    expect(fs.readFileSync(path.join(tmp.dir, '.claude', 'skills', 'my-style', 'SKILL.md'), 'utf8')).toContain('vibe-style: true');
+    expect(fs.existsSync(path.join(tmp.dir, '.claude', 'skills', 'my-style', 'references', 'pacing.md'))).toBe(true);
+  });
+
+  it('never clobbers an existing user skill', () => {
+    fs.mkdirSync(path.join(tmp.dir, '.claude', 'skills', 'mine'), { recursive: true });
+    fs.writeFileSync(path.join(tmp.dir, '.claude', 'skills', 'mine', 'SKILL.md'), 'ORIGINAL', 'utf8');
+    stage('mine', 'STAGED-NEW');
+    const r = finalizeDistilledSkill(tmp.dir, 'p', 'mine');
+    expect(r.placed).toBe(false);
+    expect(fs.readFileSync(path.join(tmp.dir, '.claude', 'skills', 'mine', 'SKILL.md'), 'utf8')).toBe('ORIGINAL');
+  });
+
+  it('is a no-op when nothing was staged', () => {
+    expect(finalizeDistilledSkill(tmp.dir, 'p', 'absent').placed).toBe(false);
   });
 });

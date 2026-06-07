@@ -10,6 +10,35 @@ import type { TurnResult } from '../agent/runner-types.js';
 import type { AgentEvent } from '../agent/events.js';
 import { projectDir } from './context.js';
 
+// ── Agent-feed watchers (VT.4 F18) ───────────────────────────────────────────
+// A normal chat turn streams to the /ws/agent socket that SENT it. But turns started server-side
+// (e.g. "Save as Template" distill via POST /api/templates/distill) have no initiating socket, so
+// nothing reached the live feed — the "watch the agent feed" hint showed nothing until a reload.
+// /ws/agent sockets announce the project they're viewing ({type:'watch', project}); HTTP-triggered
+// turns call broadcastAgentEvent() to push their events to those watchers live. (Chat turns do NOT
+// broadcast — they already reach their own socket — so the initiator never double-renders.)
+const agentWatchers = new Map<string, Set<(e: AgentEvent) => void>>();
+
+export function registerAgentWatcher(project: string, send: (e: AgentEvent) => void): void {
+  let set = agentWatchers.get(project);
+  if (!set) agentWatchers.set(project, (set = new Set()));
+  set.add(send);
+}
+
+export function unregisterAgentWatcher(project: string, send: (e: AgentEvent) => void): void {
+  agentWatchers.get(project)?.delete(send);
+}
+
+export function broadcastAgentEvent(project: string, e: AgentEvent): void {
+  for (const send of agentWatchers.get(project) ?? []) {
+    try {
+      send(e);
+    } catch {
+      /* socket gone — close handler unregisters it */
+    }
+  }
+}
+
 export async function runAgentTurn(
   project: string,
   prompt: string,

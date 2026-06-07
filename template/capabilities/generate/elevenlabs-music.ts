@@ -44,6 +44,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
+import { recordGenerateSpend, estimateMusicCostUsd } from './spend';
 
 // ───────────────────────────── .env loader (dependency-free) ─────────────────
 function loadDotEnv(): void {
@@ -204,6 +205,9 @@ const client = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
   const buf = await toBuffer(audio);
   fs.mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true });
   fs.writeFileSync(outPath, buf);
+
+  // F15: meter the paid call into the project's budget ledger + provenance (best-effort, never throws).
+  recordGenerateSpend({ outPath, capability: 'generate/elevenlabs-music', model, costUsd: estimateMusicCostUsd(lengthMs / 1000) });
 
   console.log(`\n✓ Wrote music: ${outPath} (${(buf.length / 1024).toFixed(0)} KB)`);
   console.log('\nNext steps:');

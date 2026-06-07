@@ -30,6 +30,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ImageEditParamsNonStreaming, ImagesResponse } from 'openai/resources/images';
 import { loadDotEnv, modelId, requireInputFile, run, runCapability, workDir } from '../_env/contract';
+import { recordGenerateSpend, estimateImageCostUsd } from './spend';
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -214,6 +215,8 @@ async function main(): Promise<void> {
     }
 
     const usage = rsp.usage;
+    // F15: meter the paid image generation into the budget ledger + provenance (best-effort).
+    if (outputs[0]) recordGenerateSpend({ outPath: outputs[0], capability: 'generate/thumbnail', model, costUsd: estimateImageCostUsd(n) });
     console.error(`✓ ${outputs.map((o) => path.basename(o)).join('\n✓ ')}`);
     return {
       outputs,

@@ -55,6 +55,8 @@ async function main(): Promise<void> {
     './p4w-vfx-exec.test',
     // VT.1 — acquire network tools LIVE against a local fixture HTTP server (doc 13 §3) + setup-venv no-op
     './vt1-acquire-http.test',
+    // VT.5 F15 — paid generator spend metering (budget ledger + provenance) for audio/image
+    './p1o-generate-spend.test',
   ];
   if (process.argv.includes('--render')) {
     files.push('./p0-render.test'); // demo-comp still render

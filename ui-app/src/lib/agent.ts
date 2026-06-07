@@ -243,7 +243,17 @@ export function useAgent(project: string): AgentApi {
       if (!aliveRef.current) return;
       const sock = new WebSocket(wsUrl());
       socketRef.current = sock;
-      sock.onopen = () => aliveRef.current && setState((p) => ({ ...p, connected: true }));
+      sock.onopen = () => {
+        if (!aliveRef.current) return;
+        // Announce the project we're viewing so server-started turns (e.g. distill / Save-as-Template)
+        // stream to this feed live (F18), not just on reload.
+        try {
+          sock.send(JSON.stringify({ type: 'watch', project }));
+        } catch {
+          /* socket raced closed — reconnect will re-announce */
+        }
+        setState((p) => ({ ...p, connected: true }));
+      };
       sock.onmessage = (ev) => {
         try {
           const evt = JSON.parse(ev.data) as AgentEvent;
@@ -276,6 +286,19 @@ export function useAgent(project: string): AgentApi {
       socketRef.current = null;
     };
   }, [apply]);
+
+  // Re-announce the watched project when it changes (the socket can outlive a project switch since
+  // the connect effect keys on the stable `apply`). Pairs with the onopen announce for fresh sockets.
+  useEffect(() => {
+    const sock = socketRef.current;
+    if (sock && sock.readyState === WebSocket.OPEN) {
+      try {
+        sock.send(JSON.stringify({ type: 'watch', project }));
+      } catch {
+        /* socket raced closed */
+      }
+    }
+  }, [project]);
 
   const post = useCallback((payload: Record<string, unknown>) => {
     const sock = socketRef.current;

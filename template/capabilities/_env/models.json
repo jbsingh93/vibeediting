@@ -78,6 +78,8 @@
       "cliFlag": "--model (or --v3 shortcut)",
       "usedBy": ["capabilities/generate/elevenlabs-tts.ts"],
       "alternatives": ["eleven_v3 (most expressive, 74 langs, audio tags work; --v3)", "eleven_flash_v2_5 (real-time)"],
+      "cost": { "usdPer1kChars": 0.18 },
+      "_cost": "ESTIMATE for the budget ledger only — ElevenLabs bills in CREDITS whose USD rate varies by plan (~$0.18/1k chars on Creator). The plan-gate cost approval is the real spend control.",
       "docs": "https://elevenlabs.io/docs"
     },
     "ttsExpressive": {
@@ -95,6 +97,8 @@
       "purpose": "Instrumental BGM generation (instrumental by default).",
       "cliFlag": "--model",
       "usedBy": ["capabilities/generate/elevenlabs-music.ts"],
+      "cost": { "usdPerSecond": 0.02 },
+      "_cost": "ESTIMATE for the budget ledger (ElevenLabs credits → USD varies by plan).",
       "notes": "Only model currently available."
     },
     "sfx": {
@@ -103,7 +107,9 @@
       "status": "active",
       "purpose": "Text-to-sound-effects generation.",
       "cliFlag": "--model",
-      "usedBy": ["capabilities/generate/elevenlabs-sfx.ts"]
+      "usedBy": ["capabilities/generate/elevenlabs-sfx.ts"],
+      "cost": { "usdFlat": 0.02 },
+      "_cost": "ESTIMATE for the budget ledger (short clips; ElevenLabs credits → USD varies by plan)."
     },
     "voiceId_default": {
       "id": "",
@@ -125,6 +131,8 @@
       "envOverride": "OPENAI_IMAGE_MODEL",
       "cliFlag": "(none — reads this registry via modelId('image.thumbnail'))",
       "usedBy": ["capabilities/generate/thumbnail.ts"],
+      "cost": { "usdPerImage": 0.2 },
+      "_cost": "ESTIMATE for the budget ledger (~$0.04–0.21/image by size/quality + input-frame tokens; using the high-quality mid).",
       "notes": "Pin the dated snapshot, not the 'gpt-image-2' alias. NEVER send input_fidelity (removed in gpt-image-2 — the request fails). Sizes: edges multiples of 16, long edge ≤3840, ratio ≤3:1; we generate at long-edge-2048 (16:9 → 2048x1152, 9:16 → 1152x2048) and downscale. Cost ≈ $0.04–0.21/image (medium–high) + input-frame tokens. Needs openai npm >6.34.0 (images.edit validator bug); we ship 6.37.0. Non-ASCII glyphs (æ/ø/å …) may garble in-model — overlay text in Remotion instead. Prompting rules: capabilities/generate/THUMBNAIL-GUIDE.md.",
       "alternatives": ["gpt-image-2 (alias, auto-upgrades)", "gpt-image-1.5 (legacy — requires input_fidelity=high for faces)"],
       "docs": "https://developers.openai.com/api/docs/models/gpt-image-2"

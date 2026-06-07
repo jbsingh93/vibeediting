@@ -33,8 +33,15 @@ brief, the decisions and the corrections from the chat alone, and say so in the 
 
 ## Output you write
 
-Create **`.claude/skills/<slug>/SKILL.md`** where `<slug>` is the user's chosen name,
-lowercase-kebab (ask if not given). Frontmatter (REQUIRED — the wizard scans for it):
+Write **`SKILL.md`** where `<slug>` is the user's chosen name, lowercase-kebab (ask if not given):
+
+- **From the cockpit** (the "Save as Template" button / a distill request): write to the **exact path
+  the request names** — the cockpit stages it under `out/work/<project>/distill/<slug>/SKILL.md` and
+  then places it into `.claude/skills/<slug>/` for you (the headless agent can't write into `.claude/`
+  itself). Put any `references/` next to that staged `SKILL.md`. Do NOT try to write into `.claude/`.
+- **Interactively** (your own Claude/Codex session): write straight to `.claude/skills/<slug>/SKILL.md`.
+
+Frontmatter (REQUIRED — the wizard scans `.claude/skills/*/SKILL.md` for it):
 
 ```yaml
 ---

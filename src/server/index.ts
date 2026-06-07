@@ -20,7 +20,7 @@ import { startWatcher } from './watcher.js';
 import { subscribe, unsubscribe, broadcast } from './ws-hub.js';
 import { readManifest, approveStage } from './manifest.js';
 import { cancelAgentTurn } from '../agent/runner.js';
-import { runAgentTurn } from './agent-bridge.js';
+import { runAgentTurn, registerAgentWatcher, unregisterAgentWatcher } from './agent-bridge.js';
 import type { AgentEvent } from '../agent/events.js';
 import { registerManifestRoutes, planGateStage } from './manifest-routes.js';
 import { registerHealthRoutes } from './health-routes.js';
@@ -126,8 +126,26 @@ export async function buildApp(opts: BuildOpts = {}): Promise<FastifyInstance> {
           /* socket gone */
         }
       };
+      // Track which project this socket is viewing so server-side turns (distill) can stream to it
+      // live (F18). Cleared on close to avoid sending to a dead socket.
+      let watching: string | null = null;
       socket.on('message', (data: Buffer | string) => {
-        void handleAgentMessage(typeof data === 'string' ? data : data.toString(), send);
+        const raw = typeof data === 'string' ? data : data.toString();
+        try {
+          const m = JSON.parse(raw) as { type?: string; project?: string };
+          if (m.type === 'watch' && typeof m.project === 'string') {
+            if (watching && watching !== m.project) unregisterAgentWatcher(watching, send);
+            watching = m.project;
+            registerAgentWatcher(m.project, send);
+            return; // a watch announcement is not a turn
+          }
+        } catch {
+          /* not JSON — fall through to the turn handler */
+        }
+        void handleAgentMessage(raw, send);
+      });
+      socket.on('close', () => {
+        if (watching) unregisterAgentWatcher(watching, send);
       });
     });
   });
