@@ -17,6 +17,10 @@
  *                            { brief?: string, notes?: string,
  *                              stages?: { name, status, approved? }[], reply?: string,
  *                              question?: { questions: [...] } }.
+ *   VIBE_MOCK_SLEEP_MS       when set, the mock emits init + an opening text event, then SLEEPS
+ *                            this long mid-turn BEFORE finishing (the "slow turn" scenario). Lets a
+ *                            test send {type:'cancel'} while the turn is RUNNING and assert the
+ *                            child was killed (no `done` ever arrives if the kill works). Default 0.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -58,6 +62,33 @@ const sessionId = resumed ? argv[resumeIdx + 1] : 'mock-session-1';
 
 const out = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
 
+// ── slow-turn scenario: stream an opening, then HANG so a test can cancel mid-turn ──
+// A test sets VIBE_MOCK_SLEEP_MS, starts the turn, sends {type:'cancel'} while it's RUNNING,
+// and asserts the child was killed (no `done` arrives). The timeout finish is a safety net so a
+// non-cancelling test still terminates instead of wedging the suite.
+const sleepMs = Number(process.env.VIBE_MOCK_SLEEP_MS) || 0;
+if (sleepMs > 0) {
+  out({ type: 'system', subtype: 'init', session_id: sessionId, tools: [], model: 'mock-agent' });
+  out({ type: 'assistant', message: { content: [{ type: 'text', text: 'Working on it… (slow turn)' }] } });
+  setTimeout(() => {
+    out({
+      type: 'result',
+      subtype: 'success',
+      session_id: sessionId,
+      result: 'Slow turn finished.',
+      is_error: false,
+      num_turns: 1,
+      total_cost_usd: 0,
+      usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0 },
+    });
+    process.exit(0);
+  }, sleepMs);
+} else {
+  runDefault();
+}
+
+function runDefault() {
+
 // ── scenario mode: a test writes the scenario file, sends a chat turn, deletes it ──
 const scenarioPath = process.env.VIBE_MOCK_SCENARIO;
 let scenario = null;
@@ -68,6 +99,40 @@ if (scenarioPath && fs.existsSync(scenarioPath)) {
   } catch {
     scenario = null;
   }
+}
+
+// ── e2e-fail scenario (additive; doc 13 §5 agent-fail.spec) ─────────────────────────
+// A turn that ERRORS mid-stream: opening text, a tool_use whose tool_result is an ERROR (the UI's
+// failure surface = an activity row with status 'error'), then a result with is_error:true. The
+// turn still ENDS (a `result` event arrives → working:false → composer re-enabled) and the error
+// text is persisted to chat.jsonl. A subsequent turn (no e2eFail flag) recovers normally; the argv
+// log records --resume so continuity is intact. Kept separate from the default scenario on purpose.
+if (scenario && scenario.e2eFail) {
+  out({ type: 'system', subtype: 'init', session_id: sessionId, tools: [], model: 'mock-agent' });
+  out({ type: 'assistant', message: { content: [{ type: 'text', text: 'Starting the transcribe step…' }] } });
+  out({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', id: 'tu_fail', name: 'Bash', input: { command: 'npx --no-install tsx capabilities/ingest/transcribe.ts --in media/demo.mp4' } }] },
+  });
+  out({
+    type: 'user',
+    message: { content: [{ type: 'tool_result', tool_use_id: 'tu_fail', content: 'transcribe failed: model overloaded', is_error: true }] },
+  });
+  out({
+    type: 'assistant',
+    message: { content: [{ type: 'text', text: scenario.reply || 'The turn failed — the transcribe step errored out. Please try again.' }] },
+  });
+  out({
+    type: 'result',
+    subtype: 'error_during_execution',
+    session_id: sessionId,
+    result: scenario.reply || 'The turn failed — the transcribe step errored out. Please try again.',
+    is_error: true,
+    num_turns: 1,
+    total_cost_usd: 0,
+    usage: { input_tokens: 5, output_tokens: 9, cache_read_input_tokens: 0 },
+  });
+  process.exit(0);
 }
 
 if (scenario) {
@@ -211,3 +276,5 @@ function mutateManifest() {
     /* a malformed manifest is the test's problem, not the mock's */
   }
 }
+
+} // end runDefault

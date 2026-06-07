@@ -101,7 +101,24 @@ export function setupBrowser(projectDir: string): void {
   process.stderr.write(`${chalk.green('✓')} screen-record browser ready\n`);
 }
 
-export function registerSetupCommand(program: Command): void {
+/**
+ * The provisioners the `setup` command routes its flags to. Injectable so tests can assert flag
+ * plumbing (which flag reaches which provisioner, with the resolved projectDir) without touching
+ * the network/filesystem — mirrors how doctor/init keep their side effects behind a seam. [VT.2]
+ */
+export interface SetupDeps {
+  ffmpeg: (projectDir: string) => Promise<void>;
+  venv: (projectDir: string) => void;
+  browser: (projectDir: string) => void;
+}
+
+const DEFAULT_SETUP_DEPS: SetupDeps = {
+  ffmpeg: setupFfmpeg,
+  venv: setupVenv,
+  browser: setupBrowser,
+};
+
+export function registerSetupCommand(program: Command, deps: SetupDeps = DEFAULT_SETUP_DEPS): void {
   program
     .command('setup')
     .description('re-run individual provisioning steps')
@@ -114,8 +131,8 @@ export function registerSetupCommand(program: Command): void {
       if (!opts.ffmpeg && !opts.venv && !opts.browser) {
         throw new UserError('nothing to set up', 'Pass --ffmpeg, --venv, and/or --browser.');
       }
-      if (opts.ffmpeg) await setupFfmpeg(projectDir);
-      if (opts.venv) setupVenv(projectDir);
-      if (opts.browser) setupBrowser(projectDir);
+      if (opts.ffmpeg) await deps.ffmpeg(projectDir);
+      if (opts.venv) deps.venv(projectDir);
+      if (opts.browser) deps.browser(projectDir);
     });
 }

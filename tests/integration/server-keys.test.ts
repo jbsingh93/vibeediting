@@ -145,4 +145,86 @@ describe('POST /api/keys/test', () => {
     expect(body.ok).toBe(false);
     expect(body.message).toMatch(/rejected this key/i);
   });
+
+  it('surfaces a provider 500 as a non-fatal failure (no crash, no value leak)', async () => {
+    const value = 'sk-fivehundred12';
+    await app.inject({ method: 'PUT', url: '/api/keys', payload: { values: { OPENAI_API_KEY: value } } });
+
+    const fetchMock = vi.fn(async () => new Response('server error', { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await app.inject({ method: 'POST', url: '/api/keys/test', payload: { key: 'OPENAI_API_KEY' } });
+    expect(res.statusCode).toBe(200); // the route never 5xx's on a probe failure
+    const body = res.json() as { ok: boolean; message: string };
+    expect(body.ok).toBe(false);
+    expect(body.message).toMatch(/unexpected provider response \(http 500\)/i);
+    // the secret is NEVER echoed back to the client
+    expect(JSON.stringify(body)).not.toContain(value);
+  });
+
+  it('surfaces a network refusal as a "could not reach the provider" failure', async () => {
+    const value = 'sk-netrefused123';
+    await app.inject({ method: 'PUT', url: '/api/keys', payload: { values: { OPENAI_API_KEY: value } } });
+
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('fetch failed'); // undici's shape for ECONNREFUSED / DNS failure
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await app.inject({ method: 'POST', url: '/api/keys/test', payload: { key: 'OPENAI_API_KEY' } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { ok: boolean; message: string };
+    expect(body.ok).toBe(false);
+    expect(body.message).toMatch(/could not reach the provider \(network error\)/i);
+    expect(JSON.stringify(body)).not.toContain(value);
+  });
+
+  it('surfaces an aborted (timed-out) probe as a "timed out" failure', async () => {
+    const value = 'sk-timeout12345';
+    await app.inject({ method: 'PUT', url: '/api/keys', payload: { values: { OPENAI_API_KEY: value } } });
+
+    const fetchMock = vi.fn(async () => {
+      // the probe wraps fetch in an 8s AbortController; on timeout undici throws an AbortError.
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      throw err;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await app.inject({ method: 'POST', url: '/api/keys/test', payload: { key: 'OPENAI_API_KEY' } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { ok: boolean; message: string };
+    expect(body.ok).toBe(false);
+    expect(body.message).toMatch(/could not reach the provider \(timed out\)/i);
+    expect(JSON.stringify(body)).not.toContain(value);
+  });
+});
+
+describe('PUT /api/keys (rotation)', () => {
+  it('rotates an existing key in place, preserving comments + unknown lines', async () => {
+    await app.inject({ method: 'PUT', url: '/api/keys', payload: { values: { OPENAI_API_KEY: 'sk-original1234' } } });
+    expect(envText()).toContain('OPENAI_API_KEY=sk-original1234');
+
+    // overwrite with a new value (the rotation)
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/keys',
+      payload: { values: { OPENAI_API_KEY: 'sk-rotated56789' } },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const text = envText();
+    expect(text).toContain('OPENAI_API_KEY=sk-rotated56789'); // new value in place
+    expect(text).not.toContain('sk-original1234'); // old value gone (no duplicate line)
+    expect(text.match(/OPENAI_API_KEY=/g)).toHaveLength(1); // exactly one assignment
+    expect(text).toContain('# vibe project secrets'); // comment preserved
+    expect(text).toContain('VIBE_TEST_PRESENCE=1'); // unknown line preserved
+
+    // GET reflects the rotated value's mask
+    const got = await app.inject({ method: 'GET', url: '/api/keys' });
+    const row = (got.json() as { keys: Array<{ key: string; masked: string }> }).keys.find(
+      (k) => k.key === 'OPENAI_API_KEY',
+    );
+    expect(row?.masked).toBe(maskValue('sk-rotated56789'));
+  });
 });

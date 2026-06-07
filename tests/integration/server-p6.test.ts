@@ -80,6 +80,36 @@ describe('brief', () => {
     expect((res.json() as { sha256: string }).sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(fs.readFileSync(path.join(tmp.projectsDir, 'b3', 'brief.md'), 'utf8')).toBe('# updated brief');
   });
+
+  it('two writers from the same base sha → exactly ONE 409, the winner content intact', async () => {
+    tmp.seedManifest('b4');
+    // both writers loaded the same base sha
+    const get = await app.inject({ method: 'GET', url: '/api/projects/b4/brief' });
+    const baseSha = (get.json() as { sha256: string }).sha256;
+
+    // Writer A commits first against the base sha → succeeds (200).
+    const a = await app.inject({
+      method: 'PUT',
+      url: '/api/projects/b4/brief',
+      payload: { md: '# writer A wins', expect: baseSha },
+    });
+    // Writer B then commits against the now-STALE base sha → must lose with a 409.
+    const b = await app.inject({
+      method: 'PUT',
+      url: '/api/projects/b4/brief',
+      payload: { md: '# writer B clobbers', expect: baseSha },
+    });
+
+    const codes = [a.statusCode, b.statusCode].sort();
+    expect(codes).toEqual([200, 409]); // exactly one conflict
+    expect(a.statusCode).toBe(200);
+    expect(b.statusCode).toBe(409);
+    expect((b.json() as { error: string }).error).toBe('file-changed');
+    // the winner's content is on disk; the loser never clobbered it.
+    expect(fs.readFileSync(path.join(tmp.projectsDir, 'b4', 'brief.md'), 'utf8')).toBe('# writer A wins');
+    // the 409 hands back the current bytes so writer B can reconcile.
+    expect((b.json() as { md: string }).md).toBe('# writer A wins');
+  });
 });
 
 describe('asset upload (multipart)', () => {

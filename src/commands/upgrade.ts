@@ -22,6 +22,7 @@ import {
   readState,
   writeState,
   sha256,
+  statePath,
   substituteTokens,
   type ScaffoldTokens,
 } from '../init/scaffold.js';
@@ -63,6 +64,15 @@ export function upgradeProject(
 ): UpgradeReport {
   const state = readState(projectDir);
   if (!state || !state.files) {
+    // readState() returns null both for a MISSING file and for a CORRUPT one (it swallows the
+    // parse error). Distinguish them so a corrupt state.json gets an actionable message instead
+    // of "nothing to upgrade" — and is never overwritten (we throw before any write). [VT.2]
+    if (state === null && fs.existsSync(statePath(projectDir))) {
+      throw new UserError(
+        'this project\'s .vibe/state.json is corrupt (not valid JSON) — cannot upgrade safely',
+        'Restore .vibe/state.json from version control (it is git-tracked in scaffolded projects): `git checkout -- .vibe/state.json`. Note: `vibe init` cannot regenerate it here — init refuses to run in a non-empty folder.',
+      );
+    }
     throw new UserError(
       'this folder has no .vibe/state.json — nothing to upgrade',
       'Run `vibe upgrade` inside a project created by `vibe init` (or pass --project <dir>).',

@@ -29,6 +29,28 @@ test('deliver: queue a render → job row appears in #/queue and completes live'
   expect(guard.errors()).toEqual([]);
 });
 
+/** The comps dropdown lists the ids parsed from the seeded multi-comp src/Root.tsx (/api/comps →
+ *  parseCompIds). global-setup seeds AdReel + SquareAd (+ a ThumbCard Still). */
+test('deliver: comps dropdown lists ids parsed from the seeded Root.tsx', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.goto('/#/project/e2e-demo');
+  await page.locator('[data-editor-tab="deliver"]').click();
+  await expect(page.getByTestId('deliver-panel')).toBeVisible();
+
+  const comp = page.getByTestId('deliver-comp-0');
+  // wait for /api/comps to replace the bundled fallback with the parsed ids.
+  await expect.poll(async () => comp.locator('option').count()).toBeGreaterThanOrEqual(2);
+  const ids = await comp.locator('option').allInnerTexts();
+  expect(ids).toContain('AdReel');
+  expect(ids).toContain('SquareAd');
+
+  // and the dropdown is selectable to a parsed id.
+  await comp.selectOption('SquareAd');
+  await expect(comp).toHaveValue('SquareAd');
+
+  expect(guard.errors()).toEqual([]);
+});
+
 /** A dry-run queues the real render-preset stub (--dry-run envelope) — its capability name shows in
  *  the log drawer. */
 test('deliver: dry-run queues the capability job; log shows the envelope', async ({ page }) => {

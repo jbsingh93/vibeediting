@@ -25,11 +25,12 @@ import type { AssetCategory, AssetInfo, JobsWsMessage, StyleSpecInfo } from '../
 import { EmptyState } from './EmptyState';
 import { AcquireModal } from './AcquireModal';
 import { StyleSpecCard } from './StyleSpecCard';
+import { COMPOSER_PREFILL_EVENT } from './WikiModal';
 
 /** The categories a user can override to (the upload select + the tile re-assign). */
 const OVERRIDE_CATEGORIES: AssetCategory[] = ['footage', 'vo', 'music', 'sfx', 'captions', 'lut', 'image', 'data', 'other'];
 
-export function AssetManager({ projectId, onAskAgent }: { projectId: string; onAskAgent: (text: string) => void }) {
+export function AssetManager({ projectId }: { projectId: string }) {
   const [assets, setAssets] = useState<AssetInfo[] | null>(null);
   const [specs, setSpecs] = useState<StyleSpecInfo[]>([]);
   const [tab, setTab] = useState<AssetCategory | 'all'>('all');
@@ -265,9 +266,15 @@ export function AssetManager({ projectId, onAskAgent }: { projectId: string; onA
             <StyleSpecCard
               key={s.relPath}
               info={s}
+              // "Use as my style" PREFILLS the composer (never auto-sends) — same discipline as the
+              // wiki "ask the agent" affordance: applying a style is a deliberate human send (doc 13 §5).
               onUse={(relPath) =>
-                onAskAgent(
-                  `Use this style-spec as the style anchor for ${projectId}: ${relPath} — apply its measured signals and specialist parameters when planning and building scenes (keep assets on-brand — colors and tone live in brand/brand.json).`,
+                window.dispatchEvent(
+                  new CustomEvent(COMPOSER_PREFILL_EVENT, {
+                    detail: {
+                      text: `Use this style-spec as the style anchor for ${projectId}: ${relPath} — apply its measured signals and specialist parameters when planning and building scenes (keep assets on-brand — colors and tone live in brand/brand.json).`,
+                    },
+                  }),
                 )
               }
             />

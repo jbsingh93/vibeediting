@@ -16,7 +16,11 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { MAIN_PROJECT_DIR, MAIN_PROJECTS_ROOT } from '../../playwright.config.js';
+import {
+  MAIN_PROJECT_DIR,
+  MAIN_PROJECTS_ROOT,
+  CODEX_PROJECTS_ROOT,
+} from '../../playwright.config.js';
 
 const PUBLIC = path.join(MAIN_PROJECT_DIR, 'public');
 const DELIVER = path.join(MAIN_PROJECT_DIR, 'deliver');
@@ -164,6 +168,83 @@ export default async function globalSetup(): Promise<void> {
   fs.writeFileSync(
     path.join(MAIN_PROJECTS_ROOT, 'e2e-agent', 'brief.md'),
     '# Brief — e2e-agent\n\nAgent-mode project — describe the video in the chat.\n',
+    'utf8',
+  );
+
+  // ── e2e-demo style-spec (mimic result) — deliver/<p>/refs/ is where listStyleSpecs() looks.
+  //    Drives style-spec.spec.ts: the card renders measured signals + "use as my style" prefills.
+  const demoRefs = path.join(DELIVER, 'e2e-demo', 'refs');
+  fs.mkdirSync(demoRefs, { recursive: true });
+  fs.writeFileSync(
+    path.join(demoRefs, 'hormozi-ref.style-spec.json'),
+    JSON.stringify(
+      {
+        signals: { durationSec: 28, cutCount: 14, aslSec: 2, lufs: -13.4, palette: ['#0a84ff', '#000000', '#ffffff'] },
+        specialists: [
+          { specialist: 'pacing', summary: 'fast hook-driven cuts, ~2s ASL' },
+          { specialist: 'color', summary: 'high-contrast, electric blue accent on black' },
+        ],
+        note: 'distilled from a reference clip',
+      },
+      null,
+      2,
+    ) + '\n',
+    'utf8',
+  );
+
+  // ── e2e-project/src/Root.tsx — a multi-comp file so /api/comps (parseCompIds) yields >1 id.
+  //    Drives the deliver-queue comps-dropdown extension.
+  const srcDir = path.join(MAIN_PROJECT_DIR, 'src');
+  fs.mkdirSync(srcDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(srcDir, 'Root.tsx'),
+    [
+      "import { Composition, Still } from 'remotion';",
+      '',
+      'export const RemotionRoot = () => (',
+      '  <>',
+      '    <Composition id="AdReel" durationInFrames={240} fps={30} width={1080} height={1920} component={() => null} />',
+      "    <Composition id={'SquareAd'} durationInFrames={150} fps={30} width={1080} height={1080} component={() => null} />",
+      '    <Still id="ThumbCard" width={1280} height={720} component={() => null} />',
+      '  </>',
+      ');',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  // ── an UNSCOPED stray render: a video at the deliver/ ROOT (not under a project dir) → listRenders
+  //    tags it scoped:false → the [data-render-unscoped] chip (queue.spec.ts). Real bytes so it lists.
+  fs.writeFileSync(path.join(DELIVER, 'stray-at-root.mp4'), Buffer.alloc(4096, 0x42));
+
+  // ── e2e-codex project (in the CODEX tree, seeded by pointing the manifest service at its root) ──
+  //    Drives codex.spec.ts (agent: 'codex' rides the tree's vibe.config.json from fixture.mjs).
+  const savedRoot = process.env.VIBE_PROJECTS_DIR;
+  process.env.VIBE_PROJECTS_DIR = CODEX_PROJECTS_ROOT;
+  createManifest('e2e-codex', {
+    inputs: { mode: 'agent', lang: 'en', plan_gate_stage: 'motion' },
+    approvals_required: ['motion', 'deliver'],
+    notes: '# Plan — e2e-codex\n\n_(awaiting codex)_\n',
+    force: true,
+  });
+  fs.writeFileSync(
+    path.join(CODEX_PROJECTS_ROOT, 'e2e-codex', 'brief.md'),
+    '# Brief — e2e-codex\n\nCodex-mode project — describe the video in the chat.\n',
+    'utf8',
+  );
+  process.env.VIBE_PROJECTS_DIR = savedRoot ?? MAIN_PROJECTS_ROOT;
+
+  // ── e2e-agent-fail — agent-mode project dedicated to agent-fail.spec, so the persisted error
+  //    turn it writes to chat.jsonl never replays into e2e-agent (agent.spec / question.spec).
+  createManifest('e2e-agent-fail', {
+    inputs: { mode: 'agent', lang: 'en', plan_gate_stage: 'motion' },
+    approvals_required: ['motion', 'deliver'],
+    notes: '# Plan — e2e-agent-fail\n\n_(awaiting the agent)_\n',
+    force: true,
+  });
+  fs.writeFileSync(
+    path.join(MAIN_PROJECTS_ROOT, 'e2e-agent-fail', 'brief.md'),
+    '# Brief — e2e-agent-fail\n\nAgent-mode project for the failure-recovery spec.\n',
     'utf8',
   );
 

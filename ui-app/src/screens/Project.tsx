@@ -160,7 +160,7 @@ export function Project({ id, layout }: { id: string; layout: LayoutMode }) {
       <div style={{ display: 'grid', gridTemplateColumns: template, flex: 1, minHeight: 0 }}>
         {showAssets && (
           <Panel title="Assets">
-            <AssetsPanel manifest={manifest} onAskAgent={(text) => agent.send(text)} />
+            <AssetsPanel manifest={manifest} />
           </Panel>
         )}
         {showAgent && (
@@ -304,7 +304,7 @@ function Panel({
   );
 }
 
-function AssetsPanel({ manifest, onAskAgent }: { manifest: Manifest; onAskAgent: (text: string) => void }) {
+function AssetsPanel({ manifest }: { manifest: Manifest }) {
   const inputs = manifest.inputs as Record<string, unknown>;
   const keys = Object.keys(inputs).filter((k) => k !== 'plan' && k !== 'plan_gate_stage' && k !== 'agent_session_id');
   return (
@@ -322,7 +322,7 @@ function AssetsPanel({ manifest, onAskAgent }: { manifest: Manifest; onAskAgent:
           </dl>
         </div>
       )}
-      <AssetManager projectId={manifest.project_id} onAskAgent={onAskAgent} />
+      <AssetManager projectId={manifest.project_id} />
     </div>
   );
 }

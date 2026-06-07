@@ -23,23 +23,29 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = 7882;
 const OFFLINE_PORT = 7883;
 const EMPTY_PORT = 7884;
+const CODEX_PORT = 7885;
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const ARTIFACTS = path.join(REPO, 'test-artifacts');
 
 export const MAIN_PROJECT_DIR = path.join(ARTIFACTS, 'e2e-project');
 export const EMPTY_PROJECT_DIR = path.join(ARTIFACTS, 'e2e-empty');
+export const CODEX_PROJECT_DIR = path.join(ARTIFACTS, 'e2e-codex');
 export const MAIN_PROJECTS_ROOT = path.join(MAIN_PROJECT_DIR, 'projects');
 export const EMPTY_PROJECTS_ROOT = path.join(EMPTY_PROJECT_DIR, 'projects');
+export const CODEX_PROJECTS_ROOT = path.join(CODEX_PROJECT_DIR, 'projects');
 
 export const MOCK_AGENT = path.join(REPO, 'tests', 'helpers', 'mock-agent.mjs');
+export const MOCK_CODEX = path.join(REPO, 'tests', 'helpers', 'mock-codex.mjs');
 export const FAKE_RENDER = path.join(REPO, 'tests', 'helpers', 'fake-render.mjs');
 export const ARGV_LOG = path.join(ARTIFACTS, 'e2e-argv.log');
+export const CODEX_ARGV_LOG = path.join(ARTIFACTS, 'e2e-codex-argv.log');
 export const MOCK_SCENARIO_PATH = path.join(ARTIFACTS, 'e2e-mock-scenario.json');
 const NO_SUCH_AGENT = path.join(ARTIFACTS, 'no-such-agent.exe');
 
 export const OFFLINE_BASE = `http://127.0.0.1:${OFFLINE_PORT}`;
 export const EMPTY_BASE = `http://127.0.0.1:${EMPTY_PORT}`;
+export const CODEX_BASE = `http://127.0.0.1:${CODEX_PORT}`;
 
 const FIXTURE = 'node tests/e2e/fixture.mjs';
 const serve = (dir: string, port: number) =>
@@ -110,6 +116,21 @@ export default defineConfig({
         VIBE_PROJECTS_DIR: EMPTY_PROJECTS_ROOT,
         VIBE_UI_NO_OPEN: '1',
         VIBE_AGENT_BIN: MOCK_AGENT,
+      },
+    },
+    {
+      // CODEX — a tree whose vibe.config.json prefers `codex`; VIBE_CODEX_BIN points at the mock
+      // codex CLI so the WS turn routes through the codex adapter (UI-level parity, codex.spec.ts).
+      command: serve(CODEX_PROJECT_DIR, CODEX_PORT),
+      url: `${CODEX_BASE}/api/projects`,
+      reuseExistingServer: false,
+      timeout: 90_000,
+      env: {
+        VIBE_PROJECTS_DIR: CODEX_PROJECTS_ROOT,
+        VIBE_UI_NO_OPEN: '1',
+        VIBE_CODEX_BIN: MOCK_CODEX,
+        VIBE_MOCK_ARGV_LOG: CODEX_ARGV_LOG,
+        VIBE_RENDER_CMD: FAKE_RENDER,
       },
     },
   ],

@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { scaffoldProject, writeState, readState, type ScaffoldTokens } from '../../src/init/scaffold.js';
+import { scaffoldProject, writeState, readState, statePath, type ScaffoldTokens } from '../../src/init/scaffold.js';
 import { upgradeProject } from '../../src/commands/upgrade.js';
 import { UserError } from '../../src/core/errors.js';
 import { VERSION } from '../../src/version.js';
@@ -109,5 +109,45 @@ describe('upgradeProject', () => {
   it('refuses to run outside a scaffolded project (typed exit 1)', () => {
     const empty = tmp('vibe-not-a-project-');
     expect(() => upgradeProject(empty, {})).toThrowError(UserError);
+  });
+
+  it('a MISSING state.json is rejected cleanly as a UserError (exit 1)', () => {
+    // a directory with project-shaped files but no .vibe/state.json — never tracked.
+    const dir = tmp('vibe-pre-state-');
+    writeFileSync(path.join(dir, 'package.json'), '{"name":"x"}');
+    let caught: unknown;
+    try {
+      upgradeProject(dir, {});
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UserError);
+    expect((caught as UserError).message).toMatch(/no \.vibe\/state\.json/i);
+    expect((caught as UserError).exitCode).toBe(1);
+  });
+
+  it('a CORRUPT state.json → distinct typed error, file left untouched (never clobbered)', () => {
+    const { templateDir, projectDir } = seedProject();
+    // Evolve the template so an upgrade WOULD write — proving the corrupt guard fires FIRST.
+    writeFileSync(path.join(templateDir, 'CLAUDE.md'), 'guide v2 for {{PROJECT_NAME}}\n');
+    const sp = statePath(projectDir);
+    const garbage = '{ this is not: valid json ]]]';
+    writeFileSync(sp, garbage);
+
+    let caught: unknown;
+    try {
+      upgradeProject(projectDir, { templateDir });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UserError);
+    expect((caught as UserError).message).toMatch(/corrupt/i);
+    expect((caught as UserError).message).not.toMatch(/nothing to upgrade/i); // distinct from missing
+    expect((caught as UserError).exitCode).toBe(1);
+    // no file mutation: the corrupt state file is byte-for-byte unchanged, the pristine CLAUDE.md
+    // still holds v1 (the upgrade never ran).
+    expect(readFileSync(sp, 'utf8')).toBe(garbage);
+    expect(readFileSync(path.join(projectDir, 'CLAUDE.md'), 'utf8')).toContain('guide v1');
+    expect(readState(projectDir)).toBeNull(); // still unparseable
   });
 });

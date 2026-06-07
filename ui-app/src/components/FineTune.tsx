@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Player, type PlayerRef } from '@remotion/player';
 import { api } from '../lib/api';
-import type { AssetInfo, FinetuneDoc, StageName } from '../lib/types';
+import type { AssetInfo, FinetuneDoc, RenderInfo, StageName } from '../lib/types';
 import {
   type AudioMixDoc,
   type AudioTrack,
@@ -31,6 +31,7 @@ import {
   moveTrack,
   moveWord,
   nudgeSegment,
+  pickDefaultRender,
   placeEdl,
   remapEdlCaptions,
   resetToBaseline,
@@ -54,6 +55,7 @@ import { findBlockArrays, getAtPath, setAtPath } from '../lib/schema-form';
 import { COMP_LOADERS, type CompId } from '../lib/comp-registry';
 import type { LoadedComp } from '../lib/comp-registry';
 import { FineTunePreview } from '../editor/FineTunePreview';
+import { RenderPreview } from '../editor/RenderPreview';
 import { EmptyState } from './EmptyState';
 import { CaptionTrack, type ChipEditKind, type ChipId } from './finetune/CaptionTrack';
 import { SegmentTrack } from './finetune/SegmentTrack';
@@ -113,6 +115,13 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
   const [pxPerSec, setPxPerSec] = useState(60);
   const [playheadFrame, setPlayheadFrame] = useState(0);
   const [previewComp, setPreviewComp] = useState(false);
+  // Render preview (Julian 2026-06-07): fine-tune is an editor over the RENDERED VERSIONS —
+  // pick any render (v1/v2/deliverable) as the editing background instead of the data
+  // reconstruction. renderSel = the chosen RenderInfo.url; meta is probed off a detached <video>.
+  const [renders, setRenders] = useState<RenderInfo[]>([]);
+  const [renderSel, setRenderSel] = useState<string | null>(null);
+  const [renderMeta, setRenderMeta] = useState<{ durationSec: number; width: number; height: number } | null>(null);
+  const [overlayCaptions, setOverlayCaptions] = useState(true);
   const [saveState, setSaveState] = useState<{ msg: string; kind: 'ok' | 'err' } | null>(null);
   const [forkPrompt, setForkPrompt] = useState<{ stage: StageName; error: string } | null>(null);
   const [fileConflict, setFileConflict] = useState<string | null>(null);
@@ -143,17 +152,21 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
     setEmptyDocs(false);
     setSaveState(null);
     setAgentDiff(null);
+    setRenderSel(null);
     (async () => {
       try {
-        const [state, assetsRes, schemaEntry] = await Promise.all([
+        const [state, assetsRes, schemaEntry, rendersRes] = await Promise.all([
           api.finetune(project).catch((e) => {
             if ((e as { status?: number }).status === 404) return { project, docs: [] as FinetuneDoc[] };
             throw e;
           }),
           api.assets(project).catch(() => ({ assets: [] as AssetInfo[] })),
           hasPropsSchema(project) ? SCHEMA_LOADERS[project]!() : Promise.resolve(null),
+          api.renders(project).catch(() => ({ renders: [] as RenderInfo[] })),
         ]);
         if (!alive) return;
+        const sortedRenders = [...rendersRes.renders].sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
+        setRenders(sortedRenders);
         const docs = state.docs;
         if (docs.length === 0 && !schemaEntry) {
           setEmptyDocs(true); // designed empty state — auto-recovers when the first doc lands
@@ -237,6 +250,11 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
         setHistory(historyInit(initial));
         // comp preview mounts the comp's real media (often gitignored/absent) — opt-in only.
         setPreviewComp(false);
+        // Fine-tune is an editor over the RENDERED VERSIONS (Julian 2026-06-07): when the data
+        // preview has no reconstructable video (no EDL segments, no props.videoSrc), default the
+        // background to the NEWEST render instead of a placeholder — the chips land on real frames.
+        const videoFromData = !!segDoc || (props != null && typeof (props as Record<string, unknown>).videoSrc === 'string');
+        setRenderSel(pickDefaultRender(videoFromData, sortedRenders));
       } catch (e) {
         if (alive) setLoadError(e instanceof Error ? e.message : String(e));
       }
@@ -260,6 +278,38 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
       unsub();
     };
   }, [emptyDocs, project]);
+
+  // render-mode metadata probe: a detached <video> reads duration + dimensions of the chosen
+  // render so the Player can mount with the REAL aspect/length (RenderInfo carries neither).
+  // An UNLOADABLE render (corrupt/truncated file) falls back to the data preview instead of
+  // mounting junk — a decode error in the Player is never an acceptable editor state.
+  useEffect(() => {
+    setRenderMeta(null);
+    if (!renderSel) return;
+    let alive = true;
+    const bail = () => {
+      if (!alive) return;
+      setRenderSel(null);
+      setRenderMeta(null);
+    };
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => {
+      if (!alive) return;
+      if (!Number.isFinite(v.duration) || v.duration <= 0 || !v.videoWidth || !v.videoHeight) {
+        bail();
+        return;
+      }
+      setRenderMeta({ durationSec: v.duration, width: v.videoWidth, height: v.videoHeight });
+    };
+    v.onerror = bail;
+    v.src = renderSel;
+    return () => {
+      alive = false;
+      v.removeAttribute('src');
+      v.load();
+    };
+  }, [renderSel]);
 
   // comp-mode Player loads the REAL comp lazily
   useEffect(() => {
@@ -308,7 +358,8 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
     return lastGoodDuration.current;
   }, [previewComp, ctx?.schemaEntry, model?.props]);
 
-  const durationInFrames = previewComp ? compDuration : dataDuration;
+  const renderDuration = renderMeta ? Math.max(1, Math.round(renderMeta.durationSec * fps)) : null;
+  const durationInFrames = renderSel && renderDuration ? renderDuration : previewComp ? compDuration : dataDuration;
   const durationSec = durationInFrames / fps;
   const trackWidth = Math.max(300, durationSec * pxPerSec);
 
@@ -559,7 +610,7 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
     const onFrame = (e: { detail: { frame: number } }) => setPlayheadFrame(e.detail.frame);
     p.addEventListener('frameupdate', onFrame);
     return () => p.removeEventListener('frameupdate', onFrame);
-  }, [ctx, previewComp]);
+  }, [ctx, previewComp, renderSel, renderMeta]);
 
   const seekTo = useCallback((sec: number) => {
     playerRef.current?.seekTo(Math.round(sec * fps));
@@ -796,11 +847,36 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
         {previewToggleAvailable && (
           <GhostBtn
             testid="ft-preview-toggle"
-            onClick={() => setPreviewComp((v) => !v)}
+            onClick={() => {
+              setRenderSel(null);
+              setPreviewComp((v) => !v);
+            }}
             title="Switch between the data preview (captions/audio over footage) and the real composition (needs the comp's media on disk)"
           >
             {previewComp ? '▶ comp preview' : '▶ data preview'}
           </GhostBtn>
+        )}
+        {renders.length > 0 && (
+          <select
+            data-testid="ft-render-select"
+            value={renderSel ?? ''}
+            onChange={(e) => setRenderSel(e.target.value || null)}
+            title="Edit against a RENDERED version: the chosen render becomes the preview background and your live chip edits overlay it"
+            style={{ background: 'var(--surface-1)', color: renderSel ? 'var(--accent)' : 'var(--secondary)', border: `1px solid ${renderSel ? 'var(--accent)' : 'var(--hairline)'}`, borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 12, maxWidth: 240 }}
+          >
+            <option value="">▶ render preview…</option>
+            {renders.map((r) => (
+              <option key={r.url} value={r.url}>
+                {r.scoped === false ? '⚠ ' : ''}{r.relPath}
+              </option>
+            ))}
+          </select>
+        )}
+        {renderSel && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--muted)' }} title="The render carries its OLD baked-in captions — toggle the live overlay off to review the visuals without double text">
+            <input data-testid="ft-overlay-captions" type="checkbox" checked={overlayCaptions} onChange={(e) => setOverlayCaptions(e.target.checked)} />
+            overlay live captions
+          </label>
         )}
         <GhostBtn testid="ft-undo" onClick={() => setHistory((h) => (h ? historyUndo(h) : h))} disabled={!canUndo} title="Undo (Ctrl+Z)">
           ↶ Undo
@@ -953,11 +1029,41 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
               borderRadius: 'var(--radius-sm)',
               overflow: 'hidden',
               // explicit width — the Player sizes to 100% of it (a shrink-to-fit parent collapses to 0)
-              width: previewComp && compLoaded && compLoaded.width > compLoaded.height ? 'min(640px, 100%)' : 280,
+              width:
+                renderSel && renderMeta
+                  ? renderMeta.width > renderMeta.height
+                    ? 'min(640px, 100%)'
+                    : 280
+                  : previewComp && compLoaded && compLoaded.width > compLoaded.height
+                    ? 'min(640px, 100%)'
+                    : 280,
               flex: 'none',
             }}
           >
-            {previewComp && ctx.schemaEntry ? (
+            {renderSel ? (
+              renderMeta ? (
+                <Player
+                  ref={playerRef}
+                  component={RenderPreview}
+                  inputProps={{
+                    src: renderSel,
+                    captions: overlayCaptions ? chips : [],
+                    emphasisWords: model.emphasis,
+                    captionFontSize: ctx.captionStyle.fontSize,
+                    captionPaddingBottom: ctx.captionStyle.paddingBottom,
+                  }}
+                  durationInFrames={Math.max(1, durationInFrames)}
+                  fps={fps}
+                  compositionWidth={renderMeta.width}
+                  compositionHeight={renderMeta.height}
+                  controls
+                  style={{ width: '100%' }}
+                  acknowledgeRemotionLicense
+                />
+              ) : (
+                <div data-testid="ft-render-loading" style={{ color: 'var(--muted)', fontSize: 12, padding: 20 }}>Loading render…</div>
+              )
+            ) : previewComp && ctx.schemaEntry ? (
               compLoaded ? (
                 <Player
                   ref={playerRef}

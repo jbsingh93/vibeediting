@@ -144,7 +144,106 @@ describe('render happy path + loudnorm chain', () => {
   });
 });
 
+describe('invalid preset', () => {
+  it('400s POST /api/render with an unknown preset (the route validates; no 500)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/render',
+      payload: { compId: 'DemoWelcome', preset: 'not-a-real-preset', outName: 'p/x' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: string }).error).toMatch(/unknown preset "not-a-real-preset"/i);
+  });
+
+  it('400s POST /api/deliver when any item carries an unknown preset', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/deliver',
+      payload: {
+        project: 'proj',
+        items: [
+          { compId: 'A', preset: 'scene-clip', outName: 'proj/a' },
+          { compId: 'B', preset: 'bogus-preset', outName: 'proj/b' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: string }).error).toMatch(/unknown preset "bogus-preset"/i);
+  });
+});
+
 describe('cancel', () => {
+  it('cancels a RUNNING render → child killed + status reflects cancelled, no output file', async () => {
+    process.env.VIBE_RENDER_CMD = FAKE_RENDER;
+    process.env.VIBE_FAKE_RENDER_MS = '5000'; // long enough to observe `running` and cancel mid-flight
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/render',
+      payload: { compId: 'Slow', preset: 'scene-clip', outName: 'proj/slow' },
+    });
+    expect(res.statusCode).toBe(200);
+    const id = (res.json() as { job: { id: string } }).job.id;
+
+    // wait until it's actually RUNNING (the fake-render child spawned)
+    const running = await pollJob(id, (j) => j.status === 'running', 5_000);
+    expect(running.status).toBe('running');
+
+    const cancel = await app.inject({ method: 'POST', url: `/api/jobs/${id}/cancel` });
+    expect(cancel.statusCode).toBe(200);
+    expect((cancel.json() as { job: JobRecord }).job.status).toBe('cancelled');
+
+    // the killed render leaves no completed output, and the close handler does NOT flip it back to
+    // done/failed (cancelled is terminal). Give the child's close a beat, then re-read.
+    await new Promise((r) => setTimeout(r, 400));
+    const after = (await app.inject({ method: 'GET', url: `/api/jobs/${id}` })).json() as { job: JobRecord };
+    expect(after.job.status).toBe('cancelled');
+    expect(after.job.outputs ?? []).toHaveLength(0);
+  });
+
+  it('loudnorm chain failure → the rendered output is KEPT, only the chain job fails with an error', async () => {
+    process.env.VIBE_RENDER_CMD = FAKE_RENDER;
+    process.env.VIBE_FAKE_RENDER_MS = '150';
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/deliver',
+      payload: {
+        project: 'proj',
+        items: [{ compId: 'DemoWelcome', preset: 'scene-clip', outName: 'proj/keepme' }],
+        loudnorm: true,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const renderId = (res.json() as { jobs: Array<{ id: string }> }).jobs[0]!.id;
+
+    // the render itself succeeds and keeps its file (the chain runs AFTER, independently).
+    const render = await pollJob(renderId, (j) => j.status === 'done' || j.status === 'failed', 15_000);
+    expect(render.status).toBe('done');
+    const rendered = render.outputs![0]!;
+    expect(fs.existsSync(rendered)).toBe(true);
+
+    // the chained loudnorm job appears and FAILS (the fixture has no loudnorm capability).
+    const deadline = Date.now() + 6_000;
+    let chain: JobRecord | undefined;
+    while (Date.now() < deadline) {
+      chain = (
+        (await app.inject({ method: 'GET', url: '/api/jobs' })).json() as { jobs: JobRecord[] }
+      ).jobs.find((j) => j.label.includes('loudnorm'));
+      if (chain) break;
+      await new Promise((r) => setTimeout(r, 75));
+    }
+    expect(chain).toBeDefined();
+    const chainFinal = await pollJob(chain!.id, (j) => j.status === 'done' || j.status === 'failed', 8_000);
+    expect(chainFinal.status).toBe('failed');
+    expect(chainFinal.error).toBeTruthy(); // the failure surfaces an error string, not a silent drop
+
+    // CRUCIAL: the chain's failure did not delete or invalidate the render's output.
+    expect(fs.existsSync(rendered)).toBe(true);
+    const renderStill = (await app.inject({ method: 'GET', url: `/api/jobs/${renderId}` })).json() as { job: JobRecord };
+    expect(renderStill.job.status).toBe('done');
+  });
+
   it('cancels a queued job', async () => {
     process.env.VIBE_RENDER_CMD = FAKE_RENDER;
     process.env.VIBE_FAKE_RENDER_MS = '5000'; // long enough that the 2nd render stays queued

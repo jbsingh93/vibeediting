@@ -37,6 +37,7 @@ import {
   toggleEmphasis,
   trackVolumeAt,
   voWindows,
+  pickDefaultRender,
   xToMs,
   type AudioTrack,
   type CaptionWord,
@@ -309,5 +310,23 @@ describe('schemaToFields (the generated inspector)', () => {
     const root = z.toJSONSchema(z.object({ scenes: z.array(scene), musicSrc: z.string() }), { io: 'input' });
     const blocks = findBlockArrays(root as Parameters<typeof findBlockArrays>[0]);
     expect(blocks.map((b) => b.path)).toEqual(['scenes']);
+  });
+});
+
+// ── render-preview default (Julian 2026-06-07: fine-tune edits the RENDERED versions) ──────────
+describe('pickDefaultRender', () => {
+  const renders = [
+    { url: '/out/p/v1.mp4', mtime: '2026-06-07T10:00:00Z' },
+    { url: '/deliver/p/final.mp4', mtime: '2026-06-07T12:00:00Z' },
+    { url: '/out/work/p/draft.mp4', mtime: '2026-06-07T11:00:00Z' },
+  ];
+  it('defaults to the NEWEST render when the data preview has no video of its own', () => {
+    expect(pickDefaultRender(false, renders)).toBe('/deliver/p/final.mp4');
+  });
+  it('stays in data-preview mode when EDL segments / videoSrc can reconstruct the video', () => {
+    expect(pickDefaultRender(true, renders)).toBeNull();
+  });
+  it('returns null when there are no renders yet', () => {
+    expect(pickDefaultRender(false, [])).toBeNull();
   });
 });

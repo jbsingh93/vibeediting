@@ -102,6 +102,30 @@ process.stderr.write('render-preset stub: only --dry-run is supported\\n');
 process.exit(1);
 `;
 
+/**
+ * Copy the REAL acquire capability tree from template/ into the fixture so the Acquire MODAL e2e
+ * (acquire.spec.ts) drives the genuine fetch-url / download-asset CLIs against a local 127.0.0.1
+ * fixture HTTP server — real sockets, zero internet (doc 13 §5). These files are dependency-free
+ * (they import only `../_env/contract` + sibling provenance) and resolve REPO_ROOT from __dirname,
+ * which lands at the fixture project dir. We copy verbatim rather than stub so the e2e exercises the
+ * shipping contract (envelope + provenance.json shape the asset tiles read).
+ */
+const TEMPLATE = path.join(REPO, 'template');
+const ACQUIRE_CAP_FILES = [
+  ['capabilities', '_env', 'contract.ts'],
+  ['capabilities', 'acquire', 'provenance.ts'],
+  ['capabilities', 'acquire', 'fetch-url.ts'],
+  ['capabilities', 'acquire', 'download-asset.ts'],
+];
+function copyAcquireCapabilities(dir) {
+  for (const segs of ACQUIRE_CAP_FILES) {
+    const src = path.join(TEMPLATE, ...segs);
+    const dst = path.join(dir, ...segs);
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.copyFileSync(src, dst);
+  }
+}
+
 function writeTsxShim(dir) {
   const tsxDir = path.join(dir, 'node_modules', 'tsx');
   fs.mkdirSync(path.join(tsxDir, 'dist'), { recursive: true });
@@ -114,13 +138,19 @@ function writeTsxShim(dir) {
   fs.writeFileSync(path.join(tsxDir, 'dist', 'cli.mjs'), `import(String.raw\`${repoUrl}\`);\n`, 'utf8');
 }
 
-/** Shape one disposable project tree. `brandName` lets the empty tree keep the placeholder name. */
-function makeProject(dir, { brandName } = {}) {
+/** Shape one disposable project tree. `brandName` lets the empty tree keep the placeholder name;
+ *  `agent` overrides the agent preference (the codex leg uses 'codex'); `acquire` copies the real
+ *  acquire capability CLIs in (the MAIN tree needs them for acquire.spec.ts). */
+function makeProject(dir, { brandName, agent, acquire } = {}) {
   fs.rmSync(dir, { recursive: true, force: true });
   for (const rel of ['projects', 'public', 'deliver', 'out/work', 'brand', 'capabilities/deliver']) {
     fs.mkdirSync(path.join(dir, rel.split('/').join(path.sep)), { recursive: true });
   }
-  fs.writeFileSync(path.join(dir, 'vibe.config.json'), JSON.stringify(VIBE_CONFIG, null, 2) + '\n', 'utf8');
+  fs.writeFileSync(
+    path.join(dir, 'vibe.config.json'),
+    JSON.stringify({ ...VIBE_CONFIG, ...(agent ? { agent } : {}) }, null, 2) + '\n',
+    'utf8',
+  );
   fs.writeFileSync(
     path.join(dir, 'brand', 'brand.json'),
     JSON.stringify({ ...BRAND, name: brandName ?? BRAND.name }, null, 2) + '\n',
@@ -129,6 +159,17 @@ function makeProject(dir, { brandName } = {}) {
   fs.writeFileSync(path.join(dir, '.env'), ENV_TEXT, 'utf8');
   fs.writeFileSync(path.join(dir, 'CAPABILITIES.md'), CAPABILITIES_MD, 'utf8');
   fs.writeFileSync(path.join(dir, 'capabilities', 'deliver', 'render-preset.ts'), RENDER_PRESET_STUB, 'utf8');
+  if (acquire) {
+    copyAcquireCapabilities(dir);
+    // The copied capabilities use CommonJS `__dirname` (the template ships a CJS package.json — no
+    // "type":"module"). The fixture otherwise has no package.json, so tsx would treat .ts as ESM and
+    // `__dirname` would be undefined. A minimal CJS package.json restores the shipping module mode.
+    fs.writeFileSync(
+      path.join(dir, 'package.json'),
+      JSON.stringify({ name: 'e2e-fixture-project', version: '0.0.0', private: true }, null, 2) + '\n',
+      'utf8',
+    );
+  }
   // isVibeProject() (src/commands/doctor.ts) accepts vibe.config.json OR .vibe/state.json.
   fs.mkdirSync(path.join(dir, '.vibe'), { recursive: true });
   fs.writeFileSync(
@@ -165,8 +206,11 @@ function main() {
     /* best-effort */
   }
 
-  makeProject(path.join(ARTIFACTS, 'e2e-project'));
+  makeProject(path.join(ARTIFACTS, 'e2e-project'), { acquire: true });
   makeProject(path.join(ARTIFACTS, 'e2e-empty'), { brandName: 'My Brand' });
+  // CODEX leg — its own tree so vibe.config.json can prefer codex without touching the MAIN tree's
+  // claude semantics (selectRunner reads the project's config; the bridge has no env override).
+  makeProject(path.join(ARTIFACTS, 'e2e-codex'), { agent: 'codex' });
 
   process.stdout.write('[fixture] e2e project trees recreated under test-artifacts/\n');
 }

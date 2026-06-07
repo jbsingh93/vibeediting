@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { WebSocket as WsClient, type MessageEvent as WsMessageEvent } from 'ws';
 import { startServer } from '../../src/server/index.js';
+import { isAgentBusy } from '../../src/agent/runner.js';
 import type { AgentEvent } from '../../src/agent/events.js';
 import { makeTempVibeProject, MOCK_AGENT, type TempVibeProject } from '../helpers/temp-vibe-project.js';
 
@@ -25,7 +26,8 @@ const saved: Record<string, string | undefined> = {};
 beforeEach(async () => {
   tmp = makeTempVibeProject();
   tmp.useClaudeAgent(); // agent:'claude' → VIBE_AGENT_BIN drives the turn through the mock
-  for (const k of ['VIBE_AGENT_BIN', 'VIBE_MOCK_ARGV_LOG', 'VIBE_MOCK_COMPLETE_STAGE']) saved[k] = process.env[k];
+  for (const k of ['VIBE_AGENT_BIN', 'VIBE_MOCK_ARGV_LOG', 'VIBE_MOCK_COMPLETE_STAGE', 'VIBE_MOCK_SLEEP_MS'])
+    saved[k] = process.env[k];
   process.env.VIBE_AGENT_BIN = MOCK_AGENT;
   ({ app, port } = await startServer({ port: 0 }));
 });
@@ -126,5 +128,77 @@ describe('/ws/agent', () => {
         }
       });
     });
+  });
+
+  it('cancels an ACTIVE turn → child terminated, done lands, composer can start a new turn', async () => {
+    process.env.VIBE_MOCK_SLEEP_MS = '60000'; // the slow turn hangs until cancel kills the child
+    tmp.seedManifest('p4', { mode: 'wizard' });
+
+    const events: AgentEvent[] = [];
+    const ws = new WebSocketImpl(`ws://127.0.0.1:${port}/ws/agent`);
+    const opened = new Promise<void>((res) => ws.addEventListener('open', () => res()));
+    ws.addEventListener('message', (ev: WsMessageEvent) => {
+      try {
+        events.push(JSON.parse(typeof ev.data === 'string' ? ev.data : String(ev.data)) as AgentEvent);
+      } catch {
+        /* ignore non-JSON */
+      }
+    });
+    await opened;
+    ws.send(JSON.stringify({ type: 'user', project: 'p4', text: 'do the slow thing' }));
+
+    // wait until the server-side adapter actually has the turn in flight, then cancel it.
+    const deadline = Date.now() + 6_000;
+    while (!isAgentBusy('p4') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
+    expect(isAgentBusy('p4')).toBe(true);
+    ws.send(JSON.stringify({ type: 'cancel', project: 'p4' }));
+
+    // the killed child closes → a `done` is emitted (well under the 60s sleep) and the turn ends.
+    const doneBy = Date.now() + 8_000;
+    while (!events.some((e) => e.type === 'done') && Date.now() < doneBy) await new Promise((r) => setTimeout(r, 25));
+    expect(events.some((e) => e.type === 'done')).toBe(true);
+    expect(isAgentBusy('p4')).toBe(false); // no longer busy → composer can start a new turn
+
+    // a cancelled turn persists its `done` to chat.jsonl (replayable, not lost)
+    const chatPath = path.join(tmp.projectsDir, 'p4', 'chat.jsonl');
+    const lines = fs.readFileSync(chatPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines.some((e) => e.t === 'event' && e.e.type === 'done')).toBe(true);
+
+    // composer recovers: a NORMAL (fast) turn on the same project runs to completion.
+    delete process.env.VIBE_MOCK_SLEEP_MS;
+    const second = await runTurn({ type: 'user', project: 'p4', text: 'recover' });
+    expect(second.events.some((e) => e.type === 'done')).toBe(true);
+
+    ws.close();
+  }, 25_000);
+
+  it('a second WS connection after a turn sees the chat replay intact', async () => {
+    tmp.seedManifest('p5', { mode: 'wizard', running: ['ingest'] });
+
+    // first connection: run a full turn (persisted to chat.jsonl)
+    const first = await runTurn({ type: 'user', project: 'p5', text: 'first turn' });
+    expect(first.events.some((e) => e.type === 'done')).toBe(true);
+
+    // `done` is forwarded the instant the adapter parses the result line — the child process
+    // closes (and inflight clears) a tick later. Settle before asserting busy:false.
+    const settle = Date.now() + 3_000;
+    while (isAgentBusy('p5') && Date.now() < settle) await new Promise((r) => setTimeout(r, 25));
+
+    // a NEW socket connecting later is the "reconnect" — the durable transcript is the replay
+    // source (the cockpit reads it via GET /api/projects/:id/chat; the WS channel is for new turns).
+    const replay = await app.inject({ method: 'GET', url: '/api/projects/p5/chat' });
+    expect(replay.statusCode).toBe(200);
+    const body = replay.json() as { busy: boolean; entries: Array<{ t: string; text?: string; e?: AgentEvent }> };
+    expect(body.busy).toBe(false); // the turn finished
+    expect(body.entries.some((e) => e.t === 'user' && e.text === 'first turn')).toBe(true);
+    expect(body.entries.some((e) => e.t === 'event' && e.e?.type === 'done')).toBe(true);
+
+    // and the reconnected socket can run another turn that ALSO lands in the same transcript
+    const second = await runTurn({ type: 'user', project: 'p5', text: 'second turn' });
+    expect(second.events.some((e) => e.type === 'done')).toBe(true);
+    const after = (await app.inject({ method: 'GET', url: '/api/projects/p5/chat' })).json() as {
+      entries: Array<{ t: string; text?: string }>;
+    };
+    expect(after.entries.filter((e) => e.t === 'user').map((e) => e.text)).toEqual(['first turn', 'second turn']);
   });
 });

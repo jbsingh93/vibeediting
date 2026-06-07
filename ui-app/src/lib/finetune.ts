@@ -288,6 +288,20 @@ export function gainDbToAmplitude(gainDb: number): number {
   return Math.pow(10, gainDb / 20);
 }
 
+/**
+ * Pick the default render-preview background (Julian 2026-06-07: fine-tune is an editor over the
+ * RENDERED VERSIONS). When the editable data can reconstruct video itself (EDL segments or a
+ * props.videoSrc), the data preview stays the default; otherwise the NEWEST render wins over a
+ * placeholder. Returns the render url, or null to stay in data-preview mode.
+ */
+export function pickDefaultRender(
+  hasVideoFromData: boolean,
+  renders: { url: string; mtime: string }[],
+): string | null {
+  if (hasVideoFromData || renders.length === 0) return null;
+  return [...renders].sort((a, b) => (a.mtime < b.mtime ? 1 : -1))[0].url;
+}
+
 /** Spoken-word windows (sec) from output-time captions — what BGM ducks under. */
 export function voWindows(words: { startMs: number; endMs: number }[]): [number, number][] {
   const wins: [number, number][] = [];

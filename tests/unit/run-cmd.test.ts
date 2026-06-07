@@ -71,4 +71,21 @@ describe('resolveCapabilityScript', () => {
     expect(() => resolveCapabilityScript(dir, '../secrets')).toThrowError(UserError);
     expect(() => resolveCapabilityScript(dir, 'nope/missing')).toThrowError(UserError);
   });
+
+  it('an unknown capability is a UserError (exit 1) with an actionable hint pointing at CAPABILITIES.md', () => {
+    const dir = tmp();
+    mkdirSync(path.join(dir, 'capabilities'), { recursive: true });
+    let caught: unknown;
+    try {
+      resolveCapabilityScript(dir, 'ingest/does-not-exist');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(UserError);
+    const err = caught as UserError;
+    expect(err.exitCode).toBe(1);
+    expect(err.message).toMatch(/capability not found: ingest\/does-not-exist/i);
+    expect(err.hint).toMatch(/CAPABILITIES\.md/);
+    expect(err.hint).toMatch(/vibe run ingest\/probe/); // a concrete, runnable example
+  });
 });

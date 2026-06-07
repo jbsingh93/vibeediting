@@ -82,4 +82,31 @@ describe('PUT /api/brand', () => {
     const res = await app.inject({ method: 'PUT', url: '/api/brand', payload: { brand: 'nope' } });
     expect(res.statusCode).toBe(400);
   });
+
+  it('two writers from the same expectSha → exactly ONE 409, the winner content intact', async () => {
+    const get = await app.inject({ method: 'GET', url: '/api/brand' });
+    const baseSha = (get.json() as { sha256: string }).sha256;
+
+    // Writer A commits first against the base sha → 200.
+    const a = await app.inject({
+      method: 'PUT',
+      url: '/api/brand',
+      payload: { brand: { name: 'Writer A' }, expectSha: baseSha },
+    });
+    // Writer B commits against the now-stale base sha → 409.
+    const b = await app.inject({
+      method: 'PUT',
+      url: '/api/brand',
+      payload: { brand: { name: 'Writer B' }, expectSha: baseSha },
+    });
+
+    const codes = [a.statusCode, b.statusCode].sort();
+    expect(codes).toEqual([200, 409]); // exactly one conflict
+    expect(a.statusCode).toBe(200);
+    expect(b.statusCode).toBe(409);
+    expect((b.json() as { error: string }).error).toMatch(/changed since/i);
+    // the winner's content is on disk; the loser never clobbered it.
+    const onDisk = JSON.parse(fs.readFileSync(brandPath(), 'utf8')) as { name: string };
+    expect(onDisk.name).toBe('Writer A');
+  });
 });
