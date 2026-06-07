@@ -1,0 +1,181 @@
+/**
+ * E2E global setup — seed deterministic projects INTO the MAIN fixture AFTER fixture.mjs recreated
+ * the trees but (because Playwright starts webServers after globalSetup) BEFORE the server boots.
+ * We write manifests via the SAME service the server reads (src/server/manifest.ts under tsx) plus
+ * direct fs for the on-disk states the server itself never writes (blocked / complete — those are
+ * the agent's / capability runs' job, mirrored here the way the parent suite seeds fixtures).
+ *
+ * Seeds (all under test-artifacts/e2e-project/):
+ *   - e2e-demo   wizard-shaped (9:16-ad), one COMPLETE ingest stage, approvals ['motion'], notes
+ *                with an `Estimated cost: $1.23 …` line (plan-chip spec), brief.md, captions.json +
+ *                a real silent WAV in public/ (finetune), and a real tiny render in deliver/ (distill
+ *                + renders panel).
+ *   - e2e-gate   motion BLOCKED at the gate (approvals ['motion']).
+ *   - e2e-agent  agent-mode (inputs.mode='agent'), plan_gate_stage motion, stub brief.
+ * Plus a user style skill (.claude/skills/my-e2e-style/SKILL.md) so the wizard shows a "yours" style.
+ */
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { MAIN_PROJECT_DIR, MAIN_PROJECTS_ROOT } from '../../playwright.config.js';
+
+const PUBLIC = path.join(MAIN_PROJECT_DIR, 'public');
+const DELIVER = path.join(MAIN_PROJECT_DIR, 'deliver');
+
+/** A real (decodable) silent 16-bit PCM mono WAV so an inline <audio> never trips the console guard. */
+function silentWav(seconds = 0.4, sampleRate = 8000): Buffer {
+  const samples = Math.round(seconds * sampleRate);
+  const dataSize = samples * 2;
+  const buf = Buffer.alloc(44 + dataSize);
+  buf.write('RIFF', 0);
+  buf.writeUInt32LE(36 + dataSize, 4);
+  buf.write('WAVE', 8);
+  buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20);
+  buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sampleRate, 24);
+  buf.writeUInt32LE(sampleRate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write('data', 36);
+  buf.writeUInt32LE(dataSize, 40);
+  return buf;
+}
+
+/** Force stage status on disk (server never writes blocked/complete — only the agent/capabilities do). */
+function setStage(
+  project: string,
+  stage: string,
+  patch: Record<string, unknown>,
+): void {
+  const p = path.join(MAIN_PROJECTS_ROOT, project, 'manifest.json');
+  const m = JSON.parse(fs.readFileSync(p, 'utf8')) as {
+    stages: Record<string, Record<string, unknown>>;
+    updated_at: string;
+    status: string;
+  };
+  m.stages[stage] = { status: 'pending', params: {}, outputs: [], attempts: 0, ...m.stages[stage], ...patch };
+  m.updated_at = new Date().toISOString();
+  // rough rollup so the gallery word matches (the server re-derives on its own writes anyway)
+  const all = Object.values(m.stages);
+  m.status = all.some((s) => s.status === 'blocked')
+    ? 'blocked'
+    : all.some((s) => s.status === 'running')
+      ? 'running'
+      : all.every((s) => s.status === 'complete')
+        ? 'complete'
+        : 'running';
+  fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n', 'utf8');
+}
+
+export default async function globalSetup(): Promise<void> {
+  // the manifest service derives projectsRoot() from VIBE_PROJECTS_DIR — point it at the MAIN tree.
+  process.env.VIBE_PROJECTS_DIR = MAIN_PROJECTS_ROOT;
+  const { createManifest, startStage } = await import('../../src/server/manifest.js');
+
+  // ── e2e-demo — the wizard-shaped, plan-chip, finetune + render fixture ──────────
+  createManifest('e2e-demo', {
+    inputs: { mode: 'wizard', format: '9:16-ad', lang: 'en', plan_gate_stage: 'motion' },
+    approvals_required: ['motion'],
+    notes:
+      '# Plan — e2e-demo\n\n' +
+      '| # | Scene | Sec |\n|---|---|---|\n| 1 | Hook | 0–3 |\n| 2 | CTA | 3–8 |\n\n' +
+      'Estimated cost: $1.23 (ElevenLabs TTS, 30s)\n',
+    force: true,
+  });
+  startStage('e2e-demo', 'ingest');
+  setStage('e2e-demo', 'ingest', {
+    status: 'complete',
+    finished_at: new Date().toISOString(),
+    outputs: ['public/e2e-demo/captions.json'],
+  });
+  fs.writeFileSync(
+    path.join(MAIN_PROJECTS_ROOT, 'e2e-demo', 'brief.md'),
+    '# Brief — e2e-demo\n\nA 9:16 ad. Hook: "AI took your job". CTA: "Follow for more".\n',
+    'utf8',
+  );
+  // finetune fixtures: a captions.json the editor renders as chips, + a real silent WAV asset.
+  const demoPub = path.join(PUBLIC, 'e2e-demo');
+  fs.mkdirSync(demoPub, { recursive: true });
+  fs.writeFileSync(
+    path.join(demoPub, 'captions.json'),
+    JSON.stringify([
+      { text: 'AI', startMs: 200, endMs: 600, timestampMs: null, confidence: null },
+      { text: 'took', startMs: 700, endMs: 1100, timestampMs: null, confidence: null },
+      { text: 'your', startMs: 1200, endMs: 1600, timestampMs: null, confidence: null },
+      { text: 'job', startMs: 3000, endMs: 3600, timestampMs: null, confidence: null },
+    ]),
+    'utf8',
+  );
+  fs.writeFileSync(path.join(demoPub, 'bgm-bed.wav'), silentWav());
+  // a real tiny render so RendersPanel shows a row (distill + renders specs).
+  const demoDeliver = path.join(DELIVER, 'e2e-demo');
+  fs.mkdirSync(demoDeliver, { recursive: true });
+  fs.writeFileSync(path.join(demoDeliver, 'AdReel-loudnorm.mp4'), Buffer.alloc(4096, 0x42));
+
+  // ── e2e-gate — motion blocked at the gate ──────────────────────────────────────
+  createManifest('e2e-gate', {
+    inputs: { mode: 'wizard', format: '9:16-ad', lang: 'en', plan_gate_stage: 'motion' },
+    approvals_required: ['motion'],
+    notes: '# Plan — e2e-gate\n\nA blocked motion gate to approve.\n',
+    force: true,
+  });
+  startStage('e2e-gate', 'ingest');
+  setStage('e2e-gate', 'ingest', { status: 'complete', finished_at: new Date().toISOString() });
+  startStage('e2e-gate', 'motion');
+  setStage('e2e-gate', 'motion', {
+    status: 'blocked',
+    finished_at: new Date().toISOString(),
+    outputs: ['out/work/e2e-gate/motion/preview-v1.mp4'],
+  });
+
+  // ── e2e-gate2 — a second blocked motion gate (Ctrl+Enter keyboard-approve spec) ──
+  createManifest('e2e-gate2', {
+    inputs: { mode: 'wizard', format: '9:16-ad', lang: 'en', plan_gate_stage: 'motion' },
+    approvals_required: ['motion'],
+    notes: '# Plan — e2e-gate2\n',
+    force: true,
+  });
+  startStage('e2e-gate2', 'motion');
+  setStage('e2e-gate2', 'motion', {
+    status: 'blocked',
+    finished_at: new Date().toISOString(),
+    outputs: ['out/work/e2e-gate2/motion/preview-v1.mp4'],
+  });
+
+  // ── e2e-agent — agent-mode project (clean slate cockpit) ────────────────────────
+  createManifest('e2e-agent', {
+    inputs: { mode: 'agent', lang: 'en', plan_gate_stage: 'motion' },
+    approvals_required: ['motion', 'deliver'],
+    notes: '# Plan — e2e-agent\n\n_(awaiting the agent)_\n',
+    force: true,
+  });
+  startStage('e2e-agent', 'ingest'); // running → the mock completes it (VIBE_MOCK_COMPLETE_STAGE default)
+  fs.writeFileSync(
+    path.join(MAIN_PROJECTS_ROOT, 'e2e-agent', 'brief.md'),
+    '# Brief — e2e-agent\n\nAgent-mode project — describe the video in the chat.\n',
+    'utf8',
+  );
+
+  // ── a user-distilled style skill so the wizard's step 2 shows a "yours" style ────
+  const skillDir = path.join(MAIN_PROJECT_DIR, '.claude', 'skills', 'my-e2e-style');
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, 'SKILL.md'),
+    [
+      '---',
+      'name: my-e2e-style',
+      'description: a distilled e2e style',
+      'vibe-style: true',
+      'vibe-style-label: My E2E Style',
+      'vibe-style-hint: ported from a finished project',
+      '---',
+      '',
+      '# My E2E Style',
+      '',
+      'Patterns and rules only.',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+}

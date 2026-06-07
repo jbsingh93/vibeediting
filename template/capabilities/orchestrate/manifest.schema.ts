@@ -42,7 +42,7 @@ export type ManifestStatus = z.infer<typeof manifestStatusSchema>;
 /**
  * One forked version of a stage's output set (P2.6b / GAP-55). When `completeStage` is called on
  * an already-`complete` stage with a *different* `params_hash`, the new run is appended here as
- * v{K+1} (approved=false) instead of overwriting the approved v1 — Chronixel's regret-protection
+ * v{K+1} (approved=false) instead of overwriting the approved v1 — the regret-protection
  * rule. Render filenames carry the matching `-v{K}` suffix (P3.5b).
  */
 export const versionRecordSchema = z.object({

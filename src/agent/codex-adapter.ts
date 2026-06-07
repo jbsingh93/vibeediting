@@ -126,6 +126,24 @@ export function eventsFromCodexLine(evt: CodexLine, lastText: { value: string })
 
 const inflight = new Map<string, ChildProcess>();
 
+/** True while a codex turn is running for this project. */
+export function isCodexBusy(project: string): boolean {
+  return inflight.has(project);
+}
+
+/** Kill the in-flight codex turn for a project (Stop button). Safe if none is running. */
+export function cancelCodexTurn(project: string): void {
+  const child = inflight.get(project);
+  if (!child) return;
+  try {
+    if (process.platform === 'win32' && child.pid)
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+    else child.kill('SIGTERM');
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Run one codex turn — same contract as runClaudeTurn (never throws; offline on failure). */
 export function runCodexTurn(opts: AgentTurnOptions): Promise<TurnResult> {
   const { projectDir, project, onEvent } = opts;

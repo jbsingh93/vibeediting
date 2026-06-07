@@ -25,5 +25,5 @@
     }
   },
   "include": ["bin/**/*.ts", "src/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["node_modules", "dist", "ui-dist", "template", "DEV-DOCS"]
+  "exclude": ["node_modules", "dist", "ui-dist", "ui-app", "template", "DEV-DOCS"]
 }

@@ -129,6 +129,47 @@ describe.skipIf(!ENABLED)('V3.6 killer integration: init → suite → lint → 
       expect(report2.preserved).toContain('src/Root.tsx');
       expect(report2.modifiedEngineFiles).toBe(1);
       expect(readFileSync(probePath, 'utf8')).toContain('// user tweak');
+
+      // ── V4: the UI server against the REAL scaffold — a render through POST /api/render ──
+      // (the cockpit's render path end-to-end: dry-run preset resolve via the project's own
+      // render-preset.ts → the project's Remotion CLI → job progress → file on disk.)
+      const { setProjectDir } = await import('../../src/server/context.js');
+      const { buildApp } = await import('../../src/server/index.js');
+      setProjectDir(target);
+      const app = await buildApp();
+      try {
+        const projects = await app.inject({ method: 'GET', url: '/api/projects' });
+        expect(projects.statusCode).toBe(200);
+
+        const styles = await app.inject({ method: 'GET', url: '/api/styles' });
+        expect((styles.json() as { styles: unknown[] }).styles.length).toBeGreaterThanOrEqual(7);
+
+        const wiki = await app.inject({ method: 'GET', url: '/api/wiki' });
+        expect((wiki.json() as { sections: unknown[] }).sections.length).toBeGreaterThan(3);
+
+        const render = await app.inject({
+          method: 'POST',
+          url: '/api/render',
+          payload: { compId: 'DemoWelcome', preset: 'scene-clip', outName: 'e2e-proof/ui-smoke', frames: '0-29' },
+        });
+        expect(render.statusCode, `POST /api/render: ${render.body}`).toBe(200);
+        const jobId = (render.json() as { id: string }).id;
+
+        const deadline = Date.now() + 8 * 60 * 1000;
+        let job: { status: string; progress?: number; error?: string } = { status: 'queued' };
+        while (Date.now() < deadline) {
+          const r = await app.inject({ method: 'GET', url: `/api/jobs/${jobId}` });
+          job = r.json() as typeof job;
+          if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') break;
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+        expect(job.status, `ui render job ended ${job.status}: ${job.error ?? ''}`).toBe('done');
+        const uiSmoke = path.join(target, 'out', 'e2e-proof', 'ui-smoke.mp4');
+        expect(existsSync(uiSmoke)).toBe(true);
+        expect(readFileSync(uiSmoke).length).toBeGreaterThan(10_000);
+      } finally {
+        await app.close();
+      }
     },
     TWENTY_MIN,
   );

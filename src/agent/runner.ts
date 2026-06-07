@@ -7,8 +7,8 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { claudeRunner } from './claude-adapter.js';
-import { codexRunner } from './codex-adapter.js';
+import { claudeRunner, isBusy as isClaudeBusy, cancelTurn as cancelClaudeTurn } from './claude-adapter.js';
+import { codexRunner, isCodexBusy, cancelCodexTurn } from './codex-adapter.js';
 import type { AgentDetection, AgentId, AgentRunner } from './runner-types.js';
 
 export type AgentPreference = AgentId | 'auto';
@@ -39,6 +39,17 @@ export interface AgentSelection {
 /** Detect both agent CLIs concurrently (the doctor/Health report). */
 export async function detectAgents(): Promise<AgentDetection[]> {
   return Promise.all([claudeRunner.detect(), codexRunner.detect()]);
+}
+
+/** True while ANY adapter has an in-flight turn for this project (the UI serializes turns). */
+export function isAgentBusy(project: string): boolean {
+  return isClaudeBusy(project) || isCodexBusy(project);
+}
+
+/** Cancel the in-flight turn for a project across both adapters (Stop button). */
+export function cancelAgentTurn(project: string): void {
+  cancelClaudeTurn(project);
+  cancelCodexTurn(project);
 }
 
 /**

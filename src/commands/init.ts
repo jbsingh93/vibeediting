@@ -221,20 +221,33 @@ export async function initProject(opts: InitOptions): Promise<string> {
   const report = await runDoctor(targetDir);
   process.stderr.write(`${renderDoctorReport(report)}\n`);
 
-  // 10 ── UI launch (V4) / next steps
+  // 10 ── next steps (the UI auto-start itself happens in the command action — D16)
   ok(`${chalk.bold(name)} is ready`);
   process.stderr.write(
     `\n  Next steps:\n` +
       `    cd ${name}\n` +
-      `    vibe ui        ${chalk.dim('# the cockpit — arrives with the next release (V4)')}\n` +
+      `    vibe ui        ${chalk.dim('# the cockpit (auto-starting now unless --no-ui)')}\n` +
       `    vibe doctor    ${chalk.dim('# health check any time')}\n` +
       `    npm test       ${chalk.dim('# the engine\'s self-test suite')}\n\n` +
-      `  Add your API keys in ${chalk.bold(`${name}/.env`)} (OpenAI, Gemini, ElevenLabs) — the file explains each one.\n`,
+      `  Add your API keys in ${chalk.bold(`${name}/.env`)} (OpenAI, Gemini, ElevenLabs) — the file explains each one\n` +
+      `  (or open the UI's ${chalk.bold('API Keys')} page — it edits the same file with test buttons).\n`,
   );
-  if (opts.ui !== false) {
-    process.stderr.write(chalk.dim('  (auto-starting the UI after init lands with V4 — until then it prints this note)\n'));
-  }
   return targetDir;
+}
+
+/** D16: `vibe init` ends with the server up and the browser open at the onboarding screen. */
+async function autoStartUi(targetDir: string): Promise<void> {
+  const { setProjectDir, readVibeConfig } = await import('../server/context.js');
+  const { startServer, openBrowser } = await import('../server/index.js');
+  setProjectDir(targetDir);
+  const port =
+    (process.env.VIBE_UI_PORT ? Number(process.env.VIBE_UI_PORT) : undefined) ??
+    readVibeConfig(targetDir).uiPort ??
+    7878;
+  const { port: actual } = await startServer({ serveStatic: true, watch: true, port });
+  const url = `http://localhost:${actual}`;
+  process.stderr.write(`\n  JBS Vibe Editing  →  ${chalk.cyan(url)}\n  (Ctrl+C to stop)\n\n`);
+  if (!process.env.VIBE_UI_NO_OPEN) openBrowser(url);
 }
 
 export function registerInitCommand(program: Command): void {
@@ -249,7 +262,7 @@ export function registerInitCommand(program: Command): void {
     .option('--no-venv', 'skip the optional Python venv without asking')
     .option('-y, --yes', 'accept defaults; never prompt')
     .action(async (name: string | undefined, opts: { brand?: string; ui: boolean; install: boolean; ffmpeg: boolean; venv?: boolean; yes?: boolean }) => {
-      await initProject({
+      const targetDir = await initProject({
         name,
         brand: opts.brand,
         install: opts.install,
@@ -258,5 +271,6 @@ export function registerInitCommand(program: Command): void {
         ui: opts.ui,
         yes: opts.yes,
       });
+      if (opts.ui !== false) await autoStartUi(targetDir);
     });
 }

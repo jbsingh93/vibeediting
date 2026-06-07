@@ -11,7 +11,7 @@ jobs:
   test:
     name: node ${{ matrix.node }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -37,8 +37,14 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Build UI client
+        run: npm run ui:build
+
       - name: Unit tests
         run: npm run test:run
+
+      - name: UI unit tests
+        run: npm run test:ui
 
       - name: CLI smoke (built binary)
         run: node dist/bin/vibe.js --version
@@ -55,6 +61,7 @@ jobs:
             const banned = files.filter(p =>
               p.startsWith('DEV-DOCS/') || p.startsWith('tests/') ||
               p.startsWith('docs/') || p.startsWith('test-artifacts/') ||
+              p.startsWith('ui-app/') ||
               p.startsWith('.env') ||
               p.startsWith('template/.vibe/') || p.startsWith('template/out/') ||
               p.startsWith('template/node_modules/') ||
@@ -64,14 +71,54 @@ jobs:
             const required = ['template/gitignore', 'template/.env.example',
               'template/.claude/skills/video-editor/SKILL.md',
               'template/.claude/agents/vibe-studio.md',
-              'template/src/demo-welcome/Main.tsx', 'template/brand/brand.json'];
+              'template/src/demo-welcome/Main.tsx', 'template/brand/brand.json',
+              'ui-dist/index.html'];
             const missing = required.filter(p => !files.includes(p));
-            if (missing.length) { console.error('Required template payload missing from tarball:', missing); process.exit(1); }
+            if (missing.length) { console.error('Required payload missing from tarball:', missing); process.exit(1); }
             console.log('Tarball clean:', files.length, 'files');
           "
 
+  # V4.7 — the cockpit E2E suite against the real `vibe ui` server (mock agent + fake render).
+  # Windows + macOS per GATE V4 (the user-facing platforms).
+  ui-e2e:
+    name: ui e2e / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build UI client
+        run: npm run ui:build
+
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E
+        run: npm run test:e2e
+
+      - name: Upload E2E artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-${{ matrix.os }}
+          path: test-artifacts/playwright*
+          if-no-files-found: ignore
+
   # V3.6 — the killer integration test: vibe init into a tmpdir → the scaffold's own
   # capability suite + strict lint + a real DemoWelcome still render. Win + mac per GATE V3.
+  # V4 extends it with a UI-server render smoke (POST /api/render through the real engine).
   scaffold-e2e:
     name: scaffold e2e / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

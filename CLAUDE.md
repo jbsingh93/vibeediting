@@ -60,6 +60,10 @@ experiences the tool (DEV-DOCS doc 12 is the authoritative reference, incl. the 
 3. UI surfaces additionally get a **live Playwright (MCP) walk** against the real `vibe ui` server
    on a project scaffolded in that test folder from the installed tarball — clicks, forms, agent
    stream, screenshots; findings triaged to `DEV-DOCS/notes/live-qa/`. Blockers/majors block the row.
+4. Smokes/walks that need real media use the standing **`raw-footage/` fixtures inside that test
+   folder** (`1.mp4`: 1080p HEVC 30 fps, ~7.5 s — properties + usage rules in doc 12 §3a). Copy a
+   fixture into the smoke project; never point committed code or tests at it (hard rule 2 — repo
+   tests use synthetic media), and never delete `raw-footage/` during cleanup.
 
 ## Layout
 
