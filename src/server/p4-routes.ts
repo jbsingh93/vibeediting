@@ -409,14 +409,11 @@ export function registerP4Routes(app: FastifyInstance): void {
     return { projects: listFinetuneProjects() };
   });
 
-  app.get<{ Params: { id: string } }>('/api/projects/:id/finetune', async (req, reply) => {
-    const state = readFinetuneState(req.params.id);
-    if (state.docs.length === 0) {
-      return reply
-        .code(404)
-        .send({ error: `no editable docs in public/${req.params.id}/ (captions / segments / audio-mix / props JSON)` });
-    }
-    return state;
+  app.get<{ Params: { id: string } }>('/api/projects/:id/finetune', async (req) => {
+    // A project with no editable sidecars yet is a DESIGNED clean-slate state, not an error —
+    // the old 404 logged browser console noise on every fresh project (root-caused at the V5.5
+    // regression walk; the client already rendered 404 as empty, UIP6.10).
+    return readFinetuneState(req.params.id);
   });
 
   app.post<{ Params: { id: string }; Body: unknown }>('/api/projects/:id/finetune/save', async (req, reply) => {

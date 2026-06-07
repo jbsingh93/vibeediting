@@ -167,7 +167,9 @@ try {
   let envText = '';
   try { envText = fs.readFileSync(envPath, 'utf8'); } catch { /* no file */ }
   for (const key of ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'ELEVENLABS_API_KEY']) {
-    const present = !!process.env[key] || new RegExp(`^\\s*${key}\\s*=\\s*\\S`, 'm').test(envText);
+    // Horizontal whitespace ONLY around `=`: a bare `\s*` swallows the newline after an EMPTY
+    // `KEY=` line and "finds" the next line's first character (false 'set' — live-found V5).
+    const present = !!process.env[key] || new RegExp(`^[ \\t]*${key}[ \\t]*=[ \\t]*\\S`, 'm').test(envText);
     add(`.env ${key}`, present ? 'green' : 'yellow', present ? 'set' : 'not set (some flows will fail)');
   }
 }

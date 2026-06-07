@@ -243,6 +243,10 @@ export interface RenderInfo {
   bytes: number;
   mtime: string;
   loudnorm: boolean;
+  /** false = found at the out//deliver ROOT (not project-scoped) — surfaced with a tag instead of
+   *  hidden (live-found at V5 Proof A: the agent rendered to `out/<name>.mp4` and the Preview tab
+   *  was blind to every early version). */
+  scoped?: boolean;
 }
 
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.webm', '.m4v']);
@@ -258,6 +262,30 @@ export function renderUrl(relPath: string): string | null {
   if (rel.startsWith('out/')) return '/out/' + encode(rel.slice('out/'.length));
   if (rel.startsWith('public/')) return '/' + encode(rel.slice('public/'.length));
   return null;
+}
+
+/** Composition ids registered in the project's src/Root.tsx (pure parse → unit-tested).
+ *  Matches `id="X"` / `id={'X'}` within each `<Composition`/`<Still` tag, attributes on any line. */
+export function parseCompIds(rootTsx: string): string[] {
+  const out: string[] = [];
+  const tag = /<(?:Composition|Still)\b([\s\S]*?)>/g;
+  for (let m = tag.exec(rootTsx); m; m = tag.exec(rootTsx)) {
+    const attrs = m[1] ?? '';
+    const id = /\bid\s*=\s*(?:["']([A-Za-z0-9_-]+)["']|\{\s*["']([A-Za-z0-9_-]+)["']\s*\})/.exec(attrs);
+    const val = id?.[1] ?? id?.[2];
+    if (val && !out.includes(val)) out.push(val);
+  }
+  return out;
+}
+
+export function listCompIds(): string[] {
+  try {
+    const rootTsx = fs.readFileSync(path.join(projectDir(), 'src', 'Root.tsx'), 'utf8');
+    const ids = parseCompIds(rootTsx);
+    return ids.length > 0 ? ids : ['DemoWelcome'];
+  } catch {
+    return ['DemoWelcome'];
+  }
 }
 
 export function listRenders(project: string): RenderInfo[] {
@@ -299,10 +327,40 @@ export function listRenders(project: string): RenderInfo[] {
         bytes: st.size,
         mtime: new Date(st.mtimeMs).toISOString(),
         loudnorm: /loudnorm/i.test(e.name),
+        scoped: true,
       });
     }
   };
   for (const r of roots) walk(r, 0);
+
+  // Unscoped strays: videos sitting at the out// deliver/ ROOT (depth 0 only — files an agent
+  // rendered without a project-scoped --out). Shown tagged rather than hidden so early versions
+  // are never invisible; project-scoped rows stay the canonical surface.
+  for (const root of [outDir(), deliverDir()]) {
+    if (!fs.existsSync(root)) continue;
+    for (const e of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!e.isFile() || !VIDEO_EXT.has(path.extname(e.name).toLowerCase())) continue;
+      const abs = path.join(root, e.name);
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(abs);
+      } catch {
+        continue;
+      }
+      const relPath = projectRel(abs);
+      const url = renderUrl(relPath);
+      if (!url) continue;
+      out.push({
+        name: e.name,
+        relPath,
+        url,
+        bytes: st.size,
+        mtime: new Date(st.mtimeMs).toISOString(),
+        loudnorm: /loudnorm/i.test(e.name),
+        scoped: false,
+      });
+    }
+  }
   return out.sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
 }
 
@@ -588,6 +646,13 @@ export async function registerP6Routes(app: FastifyInstance): Promise<void> {
     if (!PROJECT_RE.test(req.params.id)) return { renders: [] };
     return { renders: listRenders(req.params.id) };
   });
+
+  // ── registered compositions ──────────────────────────────────────────────────
+  // src/Root.tsx is the source of truth for what `remotion render` can target. The prebuilt
+  // client can only ever BUNDLE the demo comp, but the Deliver tab renders through the
+  // project's own CLI — so it must list USER comps too (live-found at V5 Proof B: the dropdown
+  // only knew DemoWelcome and re-rendered the wrong comp).
+  app.get('/api/comps', async () => ({ comps: listCompIds() }));
 
   // ── wiki ──────────────────────────────────────────────────────────────────
   app.get('/api/wiki', async () => ({ sections: wikiSections() }));

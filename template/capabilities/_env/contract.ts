@@ -159,7 +159,21 @@ export function requireInputFile(p: string | undefined, label = 'input'): string
 
 /** Run a child process, returning {status, stdout, stderr}; never throws on non-zero. */
 export function run(cmd: string, args: string[], opts: { cwd?: string } = {}): { status: number; stdout: string; stderr: string } {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd: opts.cwd });
+  // On Windows, npm shims (npx, remotion, tsx) are .cmd files that spawnSync cannot exec
+  // without a shell — it returns status -1 / ENOENT. But shell:true splits cmd/args on spaces,
+  // which breaks absolute binary paths that contain spaces (e.g. the bundled ffmpeg under a
+  // "Program Files"-style folder). So: use a shell ONLY for bare command names (the shims), and
+  // when we do, quote any space-bearing args. Absolute/relative-path binaries run shell-free.
+  const isWin = process.platform === 'win32';
+  const isBareName = !cmd.includes('\\') && !cmd.includes('/');
+  const useShell = isWin && isBareName;
+  const finalArgs = useShell ? args.map((a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)) : args;
+  const r = spawnSync(cmd, finalArgs, {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    cwd: opts.cwd,
+    shell: useShell,
+  });
   return { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 

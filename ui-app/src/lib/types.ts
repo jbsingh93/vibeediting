@@ -365,6 +365,8 @@ export interface RenderInfo {
   bytes: number;
   mtime: string;
   loudnorm: boolean;
+  /** false = found at the out/ / deliver/ ROOT (rendered without a project-scoped --out name). */
+  scoped?: boolean;
 }
 
 // ── API-Keys page DTOs (mirror src/server/keys-routes.ts) ──────────────────────

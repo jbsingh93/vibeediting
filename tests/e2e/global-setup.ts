@@ -143,6 +143,16 @@ export default async function globalSetup(): Promise<void> {
     outputs: ['out/work/e2e-gate2/motion/preview-v1.mp4'],
   });
 
+  // ── e2e-plan — plan parked, gate stage still PENDING (the kickoff-flow shape):
+  //    the Plan tab must offer the plan-approve affordance (live-found at V5 Proof A —
+  //    approvePlan() existed but no UI element called it). Dedicated fixture: the spec mutates it.
+  createManifest('e2e-plan', {
+    inputs: { mode: 'wizard', format: '9:16-ad', lang: 'en', plan_gate_stage: 'motion' },
+    approvals_required: ['motion', 'deliver'],
+    notes: '# Plan — e2e-plan\n\nScene table parked at the plan gate.\n\nEstimated cost: $0.00 — no paid generation.\n',
+    force: true,
+  });
+
   // ── e2e-agent — agent-mode project (clean slate cockpit) ────────────────────────
   createManifest('e2e-agent', {
     inputs: { mode: 'agent', lang: 'en', plan_gate_stage: 'motion' },

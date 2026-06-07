@@ -86,4 +86,22 @@ describe('envKeyChecks', () => {
     expect(byId['env-FAL_KEY']?.status).toBe('warn'); // commented lines don't count
     expect(JSON.stringify(checks)).not.toContain('rw-secret');
   });
+
+  it('does NOT count an EMPTY `KEY=` line as set, even with content on following lines', () => {
+    // Regression (live-found V5 prep): `\s*` after `=` swallowed the newline and matched the
+    // NEXT line's first char, so every empty key except the file's last reported "set".
+    for (const k of ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'ELEVENLABS_API_KEY', 'RUNWAY_API_SECRET', 'FAL_KEY']) {
+      delete process.env[k];
+    }
+    fs.writeFileSync(
+      path.join(tmp.dir, '.env'),
+      '# template-style file: every value empty, comments between keys\n' +
+        'OPENAI_API_KEY=\n\n# REQUIRED — the visual QA eyes\nGEMINI_API_KEY=\n\n' +
+        '# REQUIRED — voice\nELEVENLABS_API_KEY=\nRUNWAY_API_SECRET=\nFAL_KEY=\n',
+    );
+    const checks = envKeyChecks(tmp.dir);
+    for (const c of checks) {
+      expect(c.status, `${c.id} must be warn when its value is empty`).toBe('warn');
+    }
+  });
 });

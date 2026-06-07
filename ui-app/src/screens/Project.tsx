@@ -200,7 +200,15 @@ export function Project({ id, layout }: { id: string; layout: LayoutMode }) {
             }
           >
             {tab === 'overview' && <EditorPanel manifest={manifest} onAskChanges={focusAgent} onMutated={reload} />}
-            {tab === 'plan' && <PlanTab manifest={manifest} onAskChanges={focusAgent} onMutated={reload} />}
+            {tab === 'plan' && (
+              <PlanTab
+                manifest={manifest}
+                onAskChanges={focusAgent}
+                onApprovePlan={() => agent.approvePlan()}
+                agentWorking={agent.working}
+                onMutated={reload}
+              />
+            )}
             {tab === 'brief' && <BriefTab projectId={manifest.project_id} />}
             {tab === 'preview' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

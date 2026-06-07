@@ -99,6 +99,8 @@ export const api = {
     postJson<{ job: JobRecord }>('/api/render', body),
   deliver: (body: { project: string; items: { compId: string; preset: Preset; outName?: string }[]; loudnorm: boolean; dryRun?: boolean; propsFile?: string }) =>
     postJson<{ jobs: JobRecord[] }>('/api/deliver', body),
+  /** Composition ids parsed from the project's src/Root.tsx (incl. USER comps — V5 F9). */
+  comps: () => getJson<{ comps: string[] }>('/api/comps'),
   cancelJob: (id: string) => postJson<{ job: JobRecord }>(`/api/jobs/${enc(id)}/cancel`),
   retryJob: (id: string) => postJson<{ job: JobRecord }>(`/api/jobs/${enc(id)}/retry`),
   system: () => getJson<SystemInfo>('/api/system'),

@@ -175,3 +175,61 @@ describe('chat replay', () => {
     expect(body.entries[0]).toMatchObject({ t: 'user', text: 'first message' });
   });
 });
+
+describe('comps listing (V5 F9 regression)', () => {
+  it('GET /api/comps parses USER comps from src/Root.tsx (multi-line attrs, Still, {expr} ids)', async () => {
+    const rootTsx = [
+      `import { Composition, Still } from 'remotion';`,
+      `export const Root = () => (<>`,
+      `  <Composition id="DemoWelcome" width={1920} height={1080} fps={30} durationInFrames={150} />`,
+      `  <Composition`,
+      `    id="MidnightTeaser"`,
+      `    width={1080}`,
+      `    height={1920}`,
+      `  />`,
+      `  <Still id={'ThumbStill'} width={1280} height={720} />`,
+      `</>);`,
+    ].join('\n');
+    fs.mkdirSync(path.join(tmp.dir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmp.dir, 'src', 'Root.tsx'), rootTsx, 'utf8');
+
+    const res = await app.inject({ method: 'GET', url: '/api/comps' });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { comps: string[] }).comps).toEqual(['DemoWelcome', 'MidnightTeaser', 'ThumbStill']);
+  });
+
+  it('falls back to DemoWelcome when Root.tsx is missing', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/comps' });
+    expect((res.json() as { comps: string[] }).comps).toEqual(['DemoWelcome']);
+  });
+});
+
+describe('renders listing', () => {
+  it('lists project-scoped renders AND tags root-level strays as unscoped (V5 F5 regression)', async () => {
+    tmp.seedManifest('vid');
+    // project-scoped renders
+    fs.mkdirSync(path.join(tmp.dir, 'out', 'vid'), { recursive: true });
+    fs.writeFileSync(path.join(tmp.dir, 'out', 'vid', 'draft-v1.mp4'), Buffer.alloc(2048, 1));
+    fs.mkdirSync(path.join(tmp.dir, 'deliver', 'vid'), { recursive: true });
+    fs.writeFileSync(path.join(tmp.dir, 'deliver', 'vid', 'final-loudnorm.mp4'), Buffer.alloc(2048, 2));
+    // a stray at the out/ ROOT (agent rendered without a project-scoped --out)
+    fs.writeFileSync(path.join(tmp.dir, 'out', 'stray_v3.mp4'), Buffer.alloc(2048, 3));
+    // another project's scoped render must NOT leak in
+    fs.mkdirSync(path.join(tmp.dir, 'out', 'otherproj'), { recursive: true });
+    fs.writeFileSync(path.join(tmp.dir, 'out', 'otherproj', 'other.mp4'), Buffer.alloc(2048, 4));
+    // non-video at the root must not appear
+    fs.writeFileSync(path.join(tmp.dir, 'out', 'notes.txt'), 'x');
+
+    const res = await app.inject({ method: 'GET', url: '/api/projects/vid/renders' });
+    expect(res.statusCode).toBe(200);
+    const renders = (res.json() as { renders: Array<{ name: string; scoped?: boolean; loudnorm: boolean; url: string }> }).renders;
+
+    const byName = Object.fromEntries(renders.map((r) => [r.name, r]));
+    expect(byName['draft-v1.mp4']).toMatchObject({ scoped: true, loudnorm: false });
+    expect(byName['final-loudnorm.mp4']).toMatchObject({ scoped: true, loudnorm: true });
+    expect(byName['stray_v3.mp4']).toMatchObject({ scoped: false });
+    expect(byName['stray_v3.mp4']!.url).toBe('/out/stray_v3.mp4');
+    expect(byName['other.mp4']).toBeUndefined();
+    expect(byName['notes.txt']).toBeUndefined();
+  });
+});

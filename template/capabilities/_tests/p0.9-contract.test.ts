@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { test, assert, assertEqual } from './harness';
 import {
-  appendProvenance, describeOutputs, hasEnv, loadDotEnv, modelId, provenancePath, REPO_ROOT, requireInputFile, sha256File, workDir,
+  appendProvenance, describeOutputs, hasEnv, loadDotEnv, modelId, provenancePath, REPO_ROOT, requireInputFile, run, sha256File, workDir,
 } from '../_env/contract';
 
 test('P0.9 workDir creates out/work/<project>/<stage>/', () => {
@@ -60,4 +60,26 @@ test('P0.9 loadDotEnv + hasEnv check PRESENCE only (no secret printing)', () => 
 
 test('P0.9 the Python contract mirror exists', () => {
   assert(fs.existsSync(path.join(REPO_ROOT, 'capabilities', '_env', 'contract.py')), 'contract.py present');
+});
+
+test('P0.9 run() can spawn a bare npm-shim name (npx) — the Windows .cmd shell path', () => {
+  // Regression (live-found V5 Proof A): spawnSync without a shell cannot exec the Windows .cmd
+  // shims (npx/tsx/remotion), so render-preset's REAL render path silently failed (status -1).
+  // run() now uses a shell for bare command names on win32; this exercises exactly that path on
+  // every platform (npx ships with npm — no install, no network).
+  const r = run('npx', ['--no-install', 'tsx', '--version'], { cwd: REPO_ROOT });
+  assertEqual(r.status, 0, `npx --no-install tsx --version exited ${r.status}: ${r.stderr.slice(-300)}`);
+  assert(/\d+\.\d+/.test(r.stdout + r.stderr), 'tsx version string expected');
+});
+
+test('P0.9 run() still handles space-bearing absolute paths + quoted args', () => {
+  // The shell branch must not regress path/arg quoting (the engine passes absolute ffmpeg paths
+  // and filter strings with spaces). node -e through a bare name exercises arg quoting under the
+  // shell; an absolute node path exercises the shell-free branch.
+  const viaShim = run('node', ['-e', 'console.log("a b")']);
+  assertEqual(viaShim.status, 0, `bare-name node -e failed: ${viaShim.stderr.slice(-200)}`);
+  assert(viaShim.stdout.includes('a b'), 'quoted arg survived the shell branch');
+  const viaPath = run(process.execPath, ['-e', 'console.log("c d")']);
+  assertEqual(viaPath.status, 0, 'absolute-path spawn failed');
+  assert(viaPath.stdout.includes('c d'), 'absolute-path arg passing intact');
 });

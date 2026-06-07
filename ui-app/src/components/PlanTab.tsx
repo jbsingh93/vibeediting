@@ -33,16 +33,25 @@ export function mentionsPaidProvider(notes: string): boolean {
 export function PlanTab({
   manifest,
   onAskChanges,
+  onApprovePlan,
+  agentWorking,
   onMutated,
 }: {
   manifest: Manifest;
   onAskChanges: () => void;
+  /** Sends the `approve_plan` WS intent (approves the gate stage + tells the agent to proceed). */
+  onApprovePlan?: () => void;
+  agentWorking?: boolean;
   onMutated: () => void;
 }) {
   const stage = planGateStage(manifest);
   const s = manifest.stages[stage] as Stage | undefined;
   const blocked = isBlockedGate(manifest, stage);
   const statusText = s ? s.status : 'not started';
+  // The kickoff flow parks the plan while the gate stage is still PENDING (nothing built yet), so
+  // the amber GateCard never shows — the plan still needs an explicit approve affordance here
+  // (live-found at V5 Proof A: approvePlan() existed but nothing in the UI called it).
+  const approvable = !blocked && !!manifest.notes && !s?.approved && !!onApprovePlan;
 
   const notes = manifest.notes ?? '';
   const cost = notes ? estimatedCost(notes) : null;
@@ -99,7 +108,7 @@ export function PlanTab({
     <div data-testid="plan-tab" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div className="mono" data-testid="plan-gate-status" style={{ color: 'var(--muted)', fontSize: 11.5 }}>
         plan gate: {stage} · {statusText}
-        {s?.status === 'complete' && s.approved ? ' · approved ✓' : ''}
+        {s?.approved ? ' · approved ✓' : ''}
       </div>
 
       {blocked && costChip}
@@ -119,22 +128,41 @@ export function PlanTab({
       {!blocked && manifest.notes && costChip}
 
       {!blocked && manifest.notes && (
-        <button
-          data-testid="plan-ask-changes"
-          onClick={onAskChanges}
-          style={{
-            alignSelf: 'flex-start',
-            background: 'transparent',
-            color: 'var(--secondary)',
-            border: '1px solid var(--hairline)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '7px 14px',
-            fontWeight: 600,
-            fontSize: 13,
-          }}
-        >
-          Ask for changes
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {approvable && (
+            <button
+              data-testid="plan-approve"
+              onClick={onApprovePlan}
+              disabled={agentWorking}
+              style={{
+                background: agentWorking ? 'var(--surface-2)' : 'var(--accent)',
+                color: agentWorking ? 'var(--muted)' : 'var(--primary)',
+                border: 'none',
+                borderRadius: 'var(--radius-sm)',
+                padding: '8px 16px',
+                fontWeight: 700,
+                fontSize: 14,
+              }}
+            >
+              {agentWorking ? 'agent working…' : 'Approve plan — agent proceeds'}
+            </button>
+          )}
+          <button
+            data-testid="plan-ask-changes"
+            onClick={onAskChanges}
+            style={{
+              background: 'transparent',
+              color: 'var(--secondary)',
+              border: '1px solid var(--hairline)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '7px 14px',
+              fontWeight: 600,
+              fontSize: 13,
+            }}
+          >
+            Ask for changes
+          </button>
+        </div>
       )}
     </div>
   );

@@ -2,7 +2,12 @@
  * UIP2.4 — the Deliver screen: preset dropdown (the EXACT 10-preset union, lib/presets.ts),
  * loudnorm −14 LUFS / −1 dBTP ON by default (CLAUDE.md delivery rule), variant rows (one template →
  * many aspect comps), queue handoff to the Seam-2 job runner. The chain renders to out/<p>/… and
- * loudnorms into test-video/<project>/ — the repo's deliverable convention.
+ * loudnorms into deliver/<project>/ — the deliverable convention.
+ *
+ * Comp ids come from GET /api/comps (the server parses the project's src/Root.tsx) — the prebuilt
+ * client can only BUNDLE the demo comp, but the Deliver tab renders through the project's own CLI,
+ * so USER comps must be listed too (live-found at V5 Proof B: the static list re-rendered the
+ * wrong comp). Falls back to the bundled COMP_IDS when the route is unavailable.
  */
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '../lib/api';
@@ -11,12 +16,13 @@ import { COMP_IDS, type CompId } from '../lib/comp-ids';
 import type { Preset } from '../lib/types';
 
 interface VariantRow {
-  compId: CompId;
+  compId: string;
   preset: Preset;
 }
 
 export function DeliverPanel({ projectId, defaultComp }: { projectId: string; defaultComp: CompId }) {
   const [rows, setRows] = useState<VariantRow[]>([{ compId: defaultComp, preset: 'vertical-ad' }]);
+  const [comps, setComps] = useState<string[]>([...COMP_IDS]);
   const [loudnorm, setLoudnorm] = useState(true); // default ON (hard rule)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -30,6 +36,14 @@ export function DeliverPanel({ projectId, defaultComp }: { projectId: string; de
       .finetune(projectId)
       .then((s) => setHasProps(s.docs.some((d) => d.kind === 'props')))
       .catch(() => setHasProps(false));
+    api
+      .comps()
+      .then(({ comps: ids }) => {
+        if (ids.length > 0) setComps(ids);
+        // No auto-preference: comps are WORKSPACE-global while projects are per-video, so the
+        // UI cannot reliably guess which comp belongs to this project — the user picks.
+      })
+      .catch(() => {});
   }, [projectId]);
 
   function setRow(i: number, patch: Partial<VariantRow>) {
@@ -51,7 +65,7 @@ export function DeliverPanel({ projectId, defaultComp }: { projectId: string; de
       setQueuedMsg(
         dryRun
           ? `${jobs.length} dry-run job(s) queued — see the Queue for the exact render argv.`
-          : `${jobs.length} render(s) queued${loudnorm ? ` · loudnorm → test-video/${projectId}/` : ''}.`,
+          : `${jobs.length} render(s) queued${loudnorm ? ` · loudnorm → deliver/${projectId}/` : ''}.`,
       );
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e));
@@ -67,8 +81,8 @@ export function DeliverPanel({ projectId, defaultComp }: { projectId: string; de
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {rows.map((row, i) => (
             <div key={i} data-testid={`deliver-row-${i}`} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <select value={row.compId} onChange={(e) => setRow(i, { compId: e.target.value as CompId })} data-testid={`deliver-comp-${i}`} style={selectStyle}>
-                {COMP_IDS.map((id) => (
+              <select value={row.compId} onChange={(e) => setRow(i, { compId: e.target.value })} data-testid={`deliver-comp-${i}`} style={selectStyle}>
+                {comps.map((id) => (
                   <option key={id} value={id}>
                     {id}
                   </option>

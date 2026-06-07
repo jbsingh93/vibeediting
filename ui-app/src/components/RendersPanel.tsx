@@ -215,6 +215,16 @@ export function RendersPanel({ manifest }: { manifest: Manifest }) {
             >
               {r.loudnorm ? 'loudnorm −14 LUFS' : 'draft'}
             </span>
+            {r.scoped === false && (
+              <span
+                className="mono"
+                data-render-unscoped
+                title="This file sits at the out/ root — it was rendered without a project-scoped --out name, so it may belong to another project."
+                style={{ fontSize: 10.5, color: 'var(--warn)', border: '1px solid var(--warn)', borderRadius: 999, padding: '1px 7px' }}
+              >
+                unscoped
+              </span>
+            )}
             <button
               onClick={() => setPlaying((p) => (p === r.relPath ? null : r.relPath))}
               data-render-action="play"

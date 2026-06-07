@@ -53,10 +53,24 @@ exactly four truths, and a "finished" video that skips them is NOT finished:
 3. **Recorded stages** — `startStage` BEFORE long work (renders, generation) and
    `completeStage` after, so the stage strip + progress bar show the user something is happening.
    Render through `deliver/render-preset` (and loudnorm) — never a bare `npx remotion render`.
+   **The render `--out` name MUST be project-scoped: `--out <project>/<name>`** (→
+   `out/<project>/<name>.mp4`) and pass `--project <project>` — the Preview tab only lists
+   `out/<project>/`, `out/work/<project>/` and `deliver/<project>/`; a bare `--out <name>` lands at
+   the out/ root where the UI can only show it as an "unscoped" stray.
+   **Cockpit turns are headless: anything you `run_in_background` is KILLED when your turn ends.**
+   Run renders/loudnorm/QA in the foreground and keep the turn open until the files exist — never
+   end a turn promising "the render will land in the background" (it won't).
 4. **Editable data in `public/<p>/`** — the Fine-tune editor lights up ONLY from
    captions/segments/audio-mix/props JSON there. A comp with numbers hardcoded in TSX cannot be
    fine-tuned: keep timelines data-driven (timeline-as-data; props.json / captions.json /
    audio-mix.json on disk) as part of BUILDING, not as an afterthought.
+   **The editor parses CANONICAL schemas only — an invented shape renders NOTHING** (live-found):
+   - `*captions*.json` → a word-level array `[{ "text", "startMs", "endMs" }]` (Remotion
+     `Caption[]` — also for kinetic/motion text; convert frames → ms with `frame/fps*1000`).
+   - `audio-mix.json` → `{ "masterLufs": -14, "tracks": [{ "id", "role": "vo"|"bgm"|"sfx",
+     "src", "offsetSec", "gainDb", "duck"? }] }` (gain in dB, NOT 0–1 volume).
+   - `segments.json` → `{ "fps", "segments": [{ "id", "srcStart", "srcEnd" }] }` (real-footage cuts).
+   - Every OTHER knob (colors, font sizes, spring constants, scene frame ranges…) → `props.json`.
 
 If a turn arrives prefixed with a `[Cockpit contract — NOT yet satisfied …]` note, fix those items
 during that turn — the note disappears once you comply.

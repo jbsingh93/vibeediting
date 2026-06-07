@@ -118,7 +118,10 @@ export function envKeyChecks(projectDir: string): DoctorCheck[] {
     { key: 'FAL_KEY', what: 'optional paid VFX (Seedance via fal.ai)', required: false },
   ];
   return keys.map(({ key, what, required }) => {
-    const present = !!process.env[key] || new RegExp(`^\\s*${key}\\s*=\\s*\\S`, 'm').test(envText);
+    // Horizontal whitespace ONLY around `=`: a bare `\s*` would swallow the newline after an
+    // EMPTY `KEY=` line and "find" the next line's first character (live-found at V5 prep —
+    // every empty key except the file's last reported as set).
+    const present = !!process.env[key] || new RegExp(`^[ \\t]*${key}[ \\t]*=[ \\t]*\\S`, 'm').test(envText);
     return {
       id: `env-${key}`,
       label: `.env ${key}`,

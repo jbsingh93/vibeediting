@@ -40,7 +40,7 @@ Read this entire SKILL.md before doing anything else. Then route to the correct 
 12. **Last-take rule.** When cutting transcripts, if the same phrase appears twice, keep the second occurrence.
 13. **Anti-fabrication gate.** Before writing tutorial content, use WebFetch/WebSearch to research; cite sources in script comments.
 14. **Spec-as-contract for >2-min videos.** Write `spec.md` (composition contract, color palette, scene plan, animation conventions, key beats — see [templates/specs/](templates/specs/)) before any TSX.
-15. **Background renders only.** Use `run_in_background: true` for any render >30s.
+15. **Background renders — interactive sessions ONLY.** In a normal Claude Code session, use `run_in_background: true` for any render >30s and keep iterating. **In cockpit mode (headless turns driven from `vibe ui`) backgrounded processes DIE the moment your turn ends** — run renders in the FOREGROUND and keep the turn open until the file lands; the human watches progress via your recorded stages, not your shell.
 16. **Tone filter.** Copy follows `brand/brand.json` → `tone.sellStyle`: `soft` bans "BUY NOW"/"AMAZING"/pressure tactics; `neutral` allows clear CTAs; `direct` allows urgency, still honest. Evidence-led, specific outcomes win at every setting.
 17. **Captions never in bottom 480 px** of 9:16 (platform UI overlap). Use `<SafeZone platform="...">` from `src/components`.
 18. **Eyes, not just ears.** Whisper only hears audio. On any video with real footage/B-roll, run `tsx capabilities/perception/gemini-video-review.ts <file> --mode describe` during ingest (add `--granularity second --transcript <captions.json>` for a Whisper-anchored per-second map) so you plan against what's actually on screen. Before delivering ANY final render, run `--mode qa` on the loudnorm'd file, AND run `tsx capabilities/perception/cut-doctor.ts` for frame-accurate cut surgery (catches mid-sentence / cut-before-payoff that Gemini alone rationalizes away). Treat `blocker`/`major` QA issues and flagged cuts as a gate (fix + re-render). See [references/video-review-gemini.md](references/video-review-gemini.md). Gemini understands; Whisper (via cut-doctor) gives the exact frame.
@@ -110,8 +110,8 @@ Three capability CLIs generate audio on the fly, straight into the Remotion pipe
 4. **Storyboard checkpoint.** Render PNGs at 0%, 10%, 25%, 50%, 75%, 90%, 100%. Check for overflow / safe-zone violations.
 5. **Preview.** The user scrubs in the cockpit Player (`vibe ui`). Ask which scenes need refinement.
 6. **Refine.** Accept frame-accurate change requests. Re-render only changed scenes.
-7. **Final render.** Background. `tsx capabilities/deliver/render-preset.ts --preset <preset> --comp <Id>`.
-8. **Loudnorm post.** `tsx capabilities/deliver/loudnorm.ts --in out/<file>.mp4`.
+7. **Final render.** `tsx capabilities/deliver/render-preset.ts --preset <preset> --comp <Id> --out <project>/<name> --project <project>` — the `--out` name MUST be project-scoped (`out/<project>/…`) or the cockpit Preview tab can't attribute it (root strays show only as "unscoped"). Background in interactive sessions; FOREGROUND in cockpit turns (rule 15).
+8. **Loudnorm post.** `tsx capabilities/deliver/loudnorm.ts --in out/<project>/<name>.mp4 --project <project>`.
 9. **Visual QA gate.** `tsx capabilities/perception/gemini-video-review.ts out/<file>-loudnorm.mp4 --mode qa --context "<aspect, platform, lang, style, duration>"` AND `tsx capabilities/perception/cut-doctor.ts out/<file>-loudnorm.mp4 --out out/cuts/<file>`. Read both reports; fix every `blocker`/`major` issue and every flagged cut, then re-render before delivery. (The full split gate: `tsx capabilities/orchestrate/verify.ts --in <file> --eyes` — objective meters are authoritative.)
 10. **Template loop.** Ask the user: "Want to save this as a template? It'll show up as a style in the wizard." (If yes → `.claude/skills/template-distiller/SKILL.md`.)
 
@@ -208,7 +208,7 @@ Take your time. Quality > speed. Do not skip:
 - Storyboard checkpoint
 - Loudnorm post-process
 
-If a render is taking >5 minutes, that's normal — use `run_in_background` and continue iterating on the next scene.
+If a render is taking >5 minutes, that's normal — in an interactive session use `run_in_background` and continue iterating on the next scene. In cockpit mode (headless turns), let it run in the foreground instead — a backgrounded render dies with your turn (hard rule 15).
 
 ---
 

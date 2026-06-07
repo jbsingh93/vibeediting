@@ -44,6 +44,7 @@ test('V3.1 vibe.config.json parses with sane defaults', () => {
 // ── V3.2 — brand system (D9/D10) ─────────────────────────────────────────────
 test('V3.2 brand/ boilerplate exists and ships NEUTRAL', () => {
   const brand = JSON.parse(read('brand/brand.json')) as {
+    name?: string;
     colors?: Record<string, string>;
     tone?: Record<string, string>;
     voice?: { elevenlabsVoiceId?: string };
@@ -51,8 +52,18 @@ test('V3.2 brand/ boilerplate exists and ships NEUTRAL', () => {
   };
   assert(/^#[0-9A-Fa-f]{6}$/.test(brand.colors?.accent ?? ''), 'brand.json colors.accent must be a hex color');
   assert(['soft', 'neutral', 'direct'].includes(brand.tone?.sellStyle ?? ''), 'tone.sellStyle must be soft|neutral|direct');
-  assertEqual(brand.voice?.elevenlabsVoiceId, '', 'voice.elevenlabsVoiceId must ship EMPTY (D10 — no personal voice)');
-  assert(Array.isArray(brand.brandWords) && brand.brandWords.length === 0, 'brandWords must ship empty');
+  // The neutrality assertions guard the SHIPPED boilerplate. Once the user configures their brand
+  // (Brand page / agent interview) the file is THEIRS — a real voice ID or brandWords list must
+  // not fail their own suite (live-found at V5: setting the brand via the UI broke `npm test`).
+  // Pristine = the boilerplate's placeholder name is still in place.
+  const pristine = (brand.name ?? '') === 'My Brand' || /\{\{\s*BRAND_NAME\s*\}\}/.test(brand.name ?? '');
+  if (pristine) {
+    assertEqual(brand.voice?.elevenlabsVoiceId, '', 'voice.elevenlabsVoiceId must ship EMPTY (D10 — no personal voice)');
+    assert(Array.isArray(brand.brandWords) && brand.brandWords.length === 0, 'brandWords must ship empty');
+  } else {
+    assert(typeof brand.voice?.elevenlabsVoiceId === 'string', 'voice.elevenlabsVoiceId must stay a string');
+    assert(Array.isArray(brand.brandWords), 'brandWords must stay an array');
+  }
   const fonts = JSON.parse(read('brand/fonts.json')) as Record<string, unknown>;
   for (const k of ['heading', 'body', 'mono']) assert(typeof fonts[k] === 'string', `fonts.json must define ${k}`);
   assert(exists('brand/brand-voice.md'), 'missing brand/brand-voice.md');
