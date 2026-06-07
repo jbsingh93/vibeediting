@@ -21,9 +21,12 @@ Claude Code or Codex CLI) and auto-starts a local web UI. See `ARCHITECTURE.md` 
 
 ```bash
 npm run build        # tsup → dist/bin/vibe.js (ESM, shebang)
+npm run ui:build     # vite → ui-dist/ (the prebuilt cockpit client; committed + shipped)
 npm run dev -- <args>   # run the CLI from source (tsx)
-npm run typecheck    # tsc --noEmit (strict, NodeNext)
-npm run test:run     # vitest unit tests
+npm run typecheck    # tsc --noEmit (package, NodeNext) + tsc -p ui-app (client, bundler)
+npm run test:run     # vitest: package unit + server integration
+npm run test:ui      # vitest: ui-app pure-logic tests (vitest.ui.config.ts)
+npm run test:e2e     # Playwright against a real `vibe ui` (mock agent + fake render)
 npm run lint         # eslint flat config
 ```
 
@@ -69,6 +72,12 @@ experiences the tool (DEV-DOCS doc 12 is the authoritative reference, incl. the 
 
 - `bin/vibe.ts` → `src/cli.ts` (commander dispatcher) → `src/commands/*`
 - `src/core/` — errors, shared infrastructure
+- `src/agent/` — AgentRunner (Claude + Codex adapters, AgentEvent union, chat/session persistence)
+- `src/server/` — the cockpit Fastify server; serves ONE user project (context.ts) + the prebuilt
+  client. Engine contracts (manifest/envelope/presets) are LOCAL MIRRORS of the template's —
+  the on-disk JSON is the contract; if the template shape changes, change both sides.
 - `template/` (from V2/V3) — the project scaffold copied by `vibe init`
-- `ui-app/` (from V4) — React client source; prebuilt to `ui-dist/` at publish
-- `tests/unit`, `tests/e2e` — vitest + playwright
+- `ui-app/` (from V4) — React client source; prebuilt to `ui-dist/` (committed, shipped). Its
+  engine types are local mirrors too — never import template/capabilities into the browser graph.
+- `tests/unit`, `tests/integration` (server-*.test.ts boot buildApp against a temp project),
+  `tests/e2e` (Playwright, 3-server topology: main/offline/empty) — vitest + playwright
