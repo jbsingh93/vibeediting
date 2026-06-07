@@ -54,8 +54,9 @@ async function main(): Promise<void> {
       const v = Number(s);
       return Number.isFinite(v) ? v : null;
     };
-    let af = base;
+    let af: string | null = base;
     let twoPass = false;
+    let bypassed = false;
     if (m) {
       const mi = num(m.input_i), mtp = num(m.input_tp), mlra = num(m.input_lra);
       const mth = num(m.input_thresh), moff = num(m.target_offset);
@@ -64,15 +65,24 @@ async function main(): Promise<void> {
           `${base}:measured_I=${mi}:measured_TP=${mtp}:measured_LRA=${mlra}` +
           `:measured_thresh=${mth}:offset=${moff}:linear=true`;
         twoPass = true;
+      } else if (mi === null) {
+        // DIGITALLY-silent source: input_i measures "-inf". There is nothing to normalize, and
+        // dynamic-mode loudnorm on exact-zero samples emits NaN/±Inf that kills the aac encoder
+        // ("Input contains (near) NaN/+-Inf" — live-found by P1K.2; one level deeper than the V5
+        // F10 -inf two-pass guard, which only rerouted to dynamic mode). Bypass the filter and
+        // deliver the audio as-is so the chain still ships.
+        af = null;
+        bypassed = true;
       }
     }
-    const r = run(ffmpeg, ['-y', '-i', input, '-af', af,
+    const r = run(ffmpeg, ['-y', '-i', input, ...(af ? ['-af', af] : []),
       '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-shortest', '-movflags', '+faststart', out]);
     if (r.status !== 0) throw new Error(`loudnorm failed (exit ${r.status}):\n${r.stderr.slice(-1200)}`);
 
     return {
       outputs: [path.resolve(out)],
-      metrics: { target: { i: +i, tp: +tp, lra: +lra }, twoPass },
+      metrics: { target: { i: +i, tp: +tp, lra: +lra }, twoPass, bypassed },
+      warnings: bypassed ? ['source audio is digital silence — loudnorm bypassed (nothing to normalize)'] : undefined,
       project: arg('project') ?? '_scratch',
       args: process.argv.slice(2),
     };

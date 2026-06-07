@@ -35,6 +35,14 @@ async function main(): Promise<void> {
     './p1i-deliver-davinci-edl.test',
     // P1J — generate/thumbnail (GAP-72: video frame + prompt → gpt-image-2 thumbnail, dry-run only)
     './p1j-thumbnail.test',
+    // P1K — deliver tools: loudnorm two-pass + silence fallback · disk guard · render presets (dry-run)
+    './p1k-deliver.test',
+    // P1L — generate/elevenlabs-{tts,music,sfx}: key + arg guards fire before any network call
+    './p1l-elevenlabs.test',
+    // P1M — perception CLIs: review guards + cut-doctor's deterministic pipeline run LIVE (no keys)
+    './p1m-perception-cli.test',
+    // P1N — screen-record capture CLIs: fail-fast envelope guards (no browser launched)
+    './p1n-screen-record-cli.test',
     // P2 — orchestration spine (manifest · provenance · split verifier · proxy · approval gate · budget guard)
     './p2-orchestrate.test',
     // P3 — Remotion template-ization (timelines + Zod props + calculateMetadata + motion lib + GSAP + variants + alpha)
@@ -43,6 +51,8 @@ async function main(): Promise<void> {
     './v3-template.test',
     // P4V — AI VFX capability layer (router + paid wrappers + sanitizers + Aleph + compositor + color-match)
     './p4v-vfx.test',
+    // P4W — the VFX executable layer LIVE: Reinhard color transfer (image/video/EMA) + ffmpeg compositor
+    './p4w-vfx-exec.test',
   ];
   if (process.argv.includes('--render')) {
     files.push('./p0-render.test'); // demo-comp still render

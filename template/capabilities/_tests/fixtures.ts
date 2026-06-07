@@ -33,6 +33,8 @@ export function ensureFixtures(): Record<string, string> {
     silenceWav: fx('silence.wav'), // tone-silence-tone
     capsJson: fx('caps.json'),
     imagePng: fx('image.png'),
+    silentMp4: fx('silent.mp4'), // 2s video + DIGITAL-SILENCE audio (loudnorm measures -inf)
+    orangePng: fx('orange.png'), // solid color reference frame (color-transfer target)
   };
 
   if (!fs.existsSync(paths.voiceWav))
@@ -51,6 +53,11 @@ export function ensureFixtures(): Record<string, string> {
         '-f', 'lavfi', '-i', 'sine=frequency=400:duration=0.8', '-filter_complex', '[0][1][2]concat=n=3:v=0:a=1[a]', '-map', '[a]', paths.silenceWav]);
   if (!fs.existsSync(paths.imagePng))
     ff(['-f', 'lavfi', '-i', 'testsrc=size=320x240', '-frames:v', '1', paths.imagePng]);
+  if (!fs.existsSync(paths.silentMp4))
+    ff(['-f', 'lavfi', '-i', 'testsrc=duration=2:size=320x240:rate=30', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo:d=2',
+        '-shortest', '-c:a', 'aac', '-pix_fmt', 'yuv420p', paths.silentMp4]);
+  if (!fs.existsSync(paths.orangePng))
+    ff(['-f', 'lavfi', '-i', 'color=c=orange:size=320x240', '-frames:v', '1', paths.orangePng]);
   if (!fs.existsSync(paths.capsJson)) {
     const caps = [
       ['welcome', 0, 400], ['um', 400, 600], ['to', 600, 800], ['this', 800, 1000], ['is', 1000, 1100],
@@ -80,5 +87,17 @@ export function runPy(scriptRel: string, args: string[]): ProcRun {
 /** Run a .ts capability under the local tsx (offline), return raw process result. */
 export function runTsx(scriptRel: string, args: string[]): ProcRun {
   const r = spawnSync(process.execPath, ['--import', 'tsx', path.join(REPO_ROOT, scriptRel), ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd: REPO_ROOT });
+  return { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+}
+
+/**
+ * Like runTsx, but with explicit env overrides — used to pin provider keys to '' (forces the
+ * "key missing" guard even when .env HAS the key: loadDotEnv never overwrites a defined var)
+ * or to a fake value (proves arg validation fires BEFORE any network call). Never real keys.
+ */
+export function runTsxEnv(scriptRel: string, args: string[], env: Record<string, string>): ProcRun {
+  const r = spawnSync(process.execPath, ['--import', 'tsx', path.join(REPO_ROOT, scriptRel), ...args], {
+    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd: REPO_ROOT, env: { ...process.env, ...env },
+  });
   return { status: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
