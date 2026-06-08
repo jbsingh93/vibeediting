@@ -15,12 +15,32 @@ export interface CaptionWord {
   confidence?: number | null;
 }
 
+/** D26: per-edge transition on a segment's incoming edge (mirrors template/src/components/edl.ts). */
+export type TransitionKind = 'cut' | 'dissolve' | 'fade' | 'slide' | 'wipe';
+export interface Transition {
+  kind: TransitionKind;
+  durationFrames: number;
+  direction?: 'l' | 'r' | 'u' | 'd';
+}
+
+/** D27: one entry in a clip's ordered effects stack. `lut` is schema-reserved (renderer = VE.5.6). */
+export type Effect =
+  | { type: 'transform'; scale?: number; x?: number; y?: number }
+  | { type: 'opacity'; value: number }
+  | { type: 'speed'; rate: number }
+  | { type: 'colorCorrect'; brightness?: number; contrast?: number; saturation?: number }
+  | { type: 'lut'; src: string };
+
 export interface EdlSegment {
   id: string;
   srcStart: number;
   srcEnd: number;
   src?: string;
   cap?: string;
+  /** Per-edge transition (incoming edge). Absent ⇒ global crossfadeFrames dissolve. */
+  transition?: Transition;
+  /** Ordered per-clip effects stack. Absent ⇒ no-op. */
+  effects?: Effect[];
 }
 
 export interface SegmentsDoc {
@@ -55,6 +75,46 @@ export const audioTrackSchema = z.object({
   offsetSec: z.number().min(0).default(0),
   gainDb: z.number().min(-36).max(12).default(0),
   duck: z.object({ depth: z.number().min(0).max(1).default(0.12) }).optional(),
+});
+
+/** client-side mirror of the server + template EDL schema (same zod; transition/effects optional). */
+export const transitionSchema = z.object({
+  kind: z.enum(['cut', 'dissolve', 'fade', 'slide', 'wipe']),
+  durationFrames: z.number().int().min(0),
+  direction: z.enum(['l', 'r', 'u', 'd']).optional(),
+});
+export const effectSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('transform'),
+    scale: z.number().positive().optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+  }),
+  z.object({ type: z.literal('opacity'), value: z.number().min(0).max(1) }),
+  z.object({ type: z.literal('speed'), rate: z.number().positive() }),
+  z.object({
+    type: z.literal('colorCorrect'),
+    brightness: z.number().min(0).optional(),
+    contrast: z.number().min(0).optional(),
+    saturation: z.number().min(0).optional(),
+  }),
+  z.object({ type: z.literal('lut'), src: z.string().min(1) }),
+]);
+export const edlSegmentSchema = z.object({
+  id: z.string().min(1),
+  srcStart: z.number().min(0),
+  srcEnd: z.number().positive(),
+  src: z.string().optional(),
+  cap: z.string().optional(),
+  transition: transitionSchema.optional(),
+  effects: z.array(effectSchema).optional(),
+});
+export const segmentsDocSchema = z.object({
+  fps: z.number().positive(),
+  crossfadeFrames: z.number().int().min(0),
+  src: z.string().optional(),
+  segments: z.array(edlSegmentSchema).min(1),
+  emphasisWords: z.array(z.string()).optional(),
 });
 
 // ── caption word-chip math (UIP4.1) ────────────────────────────────────────────
@@ -162,15 +222,84 @@ export interface PlacedEdlSegment extends EdlSegment {
   index: number;
 }
 
+/**
+ * Frames the INCOMING edge of `seg` overlaps the previous clip (VE.4). A typed `transition` wins;
+ * `cut` (or a 0 duration) means a hard cut (no overlap); absent ⇒ the global `crossfadeFrames`
+ * default — so a pre-VE EDL places exactly as before.
+ */
+export function transitionFrames(seg: EdlSegment | undefined, crossfadeFrames: number): number {
+  if (!seg?.transition) return Math.max(0, crossfadeFrames);
+  return seg.transition.kind === 'cut' ? 0 : Math.max(0, seg.transition.durationFrames);
+}
+
 export function placeEdl(segments: EdlSegment[], fps: number, crossfadeFrames: number): PlacedEdlSegment[] {
   const placed: PlacedEdlSegment[] = [];
   let cursor = 0;
   segments.forEach((s, index) => {
     const durationInFrames = Math.round((s.srcEnd - s.srcStart) * fps);
     placed.push({ ...s, from: cursor, durationInFrames, index });
-    cursor += durationInFrames - crossfadeFrames;
+    // The overlap with the NEXT clip is owned by that clip's incoming transition (default crossfade).
+    const next = segments[index + 1];
+    const overlap = Math.min(next ? transitionFrames(next, crossfadeFrames) : 0, durationInFrames);
+    cursor += durationInFrames - overlap;
   });
   return placed;
+}
+
+/**
+ * The CSS a typed transition applies to the INCOMING clip over its overlap with the previous clip
+ * (VE.4). Pure + deterministic → renders identically in `@remotion/player` (cockpit preview) and the
+ * headless-Chromium render, so `preview == render` holds without a comp-library coupling. The
+ * outgoing clip stays opaque underneath during the overlap; `backdrop` is a black layer BEHIND the
+ * incoming clip (used by `fade` for a dip-through-black). This same function is mirrored verbatim in
+ * `template/src/components/edl.ts` so the EdlTimeline render comp produces identical frames.
+ */
+export interface TransitionFrameStyle {
+  clip: { opacity?: number; transform?: string; clipPath?: string };
+  /** opacity (0..1) of a black backdrop behind the incoming clip. */
+  backdrop: number;
+}
+
+export function transitionPresentation(
+  kind: TransitionKind,
+  direction: 'l' | 'r' | 'u' | 'd' | undefined,
+  progress: number,
+): TransitionFrameStyle {
+  const p = Math.max(0, Math.min(1, progress));
+  const dist = (1 - p) * 100; // % offscreen at the start of the slide
+  switch (kind) {
+    case 'cut':
+      return { clip: {}, backdrop: 0 };
+    case 'dissolve':
+      return { clip: { opacity: p }, backdrop: 0 };
+    case 'fade':
+      return { clip: { opacity: p }, backdrop: 1 - p };
+    case 'slide': {
+      const t =
+        direction === 'r'
+          ? `translateX(${dist}%)`
+          : direction === 'u'
+            ? `translateY(${-dist}%)`
+            : direction === 'd'
+              ? `translateY(${dist}%)`
+              : `translateX(${-dist}%)`; // 'l' (default): from the left
+      return { clip: { transform: t }, backdrop: 0 };
+    }
+    case 'wipe': {
+      const rem = 100 - p * 100; // remaining hidden %
+      const inset =
+        direction === 'r'
+          ? `inset(0 0 0 ${rem}%)`
+          : direction === 'u'
+            ? `inset(0 0 ${rem}% 0)`
+            : direction === 'd'
+              ? `inset(${rem}% 0 0 0)`
+              : `inset(0 ${rem}% 0 0)`; // 'l' (default): reveal from the left
+      return { clip: { clipPath: inset }, backdrop: 0 };
+    }
+    default:
+      return { clip: { opacity: p }, backdrop: 0 };
+  }
 }
 
 export function edlTotalFrames(segments: EdlSegment[], fps: number, crossfadeFrames: number): number {
@@ -178,6 +307,126 @@ export function edlTotalFrames(segments: EdlSegment[], fps: number, crossfadeFra
   const placed = placeEdl(segments, fps, crossfadeFrames);
   const last = placed[placed.length - 1]!;
   return last.from + last.durationInFrames;
+}
+
+// ── per-clip effects (VE.5 / D27) — render math + stack ops ─────────────────────────────────────
+
+/**
+ * The combined CSS + playback rate a clip's ordered effects stack produces (VE.5.2). Pure +
+ * deterministic, so it renders IDENTICALLY in `@remotion/player` (cockpit preview) and the headless
+ * Chromium render — the launch set (`transform`/`opacity`/`speed`/`colorCorrect`) carries no parity
+ * gamble. `transform` composes translate(px)+scale; `opacity` multiplies; `colorCorrect` is a CSS
+ * `filter`; `speed` becomes the OffthreadVideo `playbackRate` (the clip's output slot length is
+ * unchanged — constant per-clip speed, D33; the source plays faster/slower within the slot). `lut`
+ * is SCHEMA-RESERVED (VE.5.6, post-launch) → a no-op here. This function is mirrored VERBATIM in
+ * `template/src/components/edl.ts` (the EdlTimeline render comp); change BOTH or `preview == render`
+ * breaks.
+ */
+export interface EffectsPresentation {
+  /** CSS for the per-clip effect wrapper (absent keys ⇒ the property is left unset). */
+  style: { transform?: string; opacity?: number; filter?: string };
+  /** OffthreadVideo playbackRate (1 = normal). */
+  playbackRate: number;
+}
+
+export function effectsPresentation(effects: Effect[] | undefined): EffectsPresentation {
+  let scale = 1;
+  let tx = 0;
+  let ty = 0;
+  let opacity = 1;
+  let rate = 1;
+  let brightness = 1;
+  let contrast = 1;
+  let saturation = 1;
+  let hasTransform = false;
+  let hasOpacity = false;
+  let hasColor = false;
+  for (const e of effects ?? []) {
+    switch (e.type) {
+      case 'transform':
+        if (e.scale !== undefined) scale *= e.scale;
+        if (e.x !== undefined) tx += e.x;
+        if (e.y !== undefined) ty += e.y;
+        hasTransform = true;
+        break;
+      case 'opacity':
+        opacity *= e.value;
+        hasOpacity = true;
+        break;
+      case 'speed':
+        rate *= e.rate;
+        break;
+      case 'colorCorrect':
+        if (e.brightness !== undefined) brightness *= e.brightness;
+        if (e.contrast !== undefined) contrast *= e.contrast;
+        if (e.saturation !== undefined) saturation *= e.saturation;
+        hasColor = true;
+        break;
+      case 'lut':
+        // schema-reserved (VE.5.6, post-launch): no-op until the WebGL LUT pass ships.
+        break;
+    }
+  }
+  const style: { transform?: string; opacity?: number; filter?: string } = {};
+  if (hasTransform) {
+    const parts: string[] = [];
+    if (tx !== 0 || ty !== 0) parts.push(`translate(${tx}px, ${ty}px)`);
+    if (scale !== 1) parts.push(`scale(${scale})`);
+    if (parts.length > 0) style.transform = parts.join(' ');
+  }
+  if (hasOpacity) style.opacity = opacity;
+  if (hasColor) style.filter = `brightness(${brightness}) contrast(${contrast}) saturate(${saturation})`;
+  return { style, playbackRate: rate > 0 ? rate : 1 };
+}
+
+/** A fresh effect of `type` with neutral (no-op) defaults — what the inspector's add-buttons drop in. */
+export function defaultEffect(type: Effect['type']): Effect {
+  switch (type) {
+    case 'transform':
+      return { type: 'transform', scale: 1, x: 0, y: 0 };
+    case 'opacity':
+      return { type: 'opacity', value: 1 };
+    case 'speed':
+      return { type: 'speed', rate: 1 };
+    case 'colorCorrect':
+      return { type: 'colorCorrect', brightness: 1, contrast: 1, saturation: 1 };
+    case 'lut':
+      return { type: 'lut', src: '' };
+  }
+}
+
+/** Append an effect to the stack (VE.5.4). Returns a new array. */
+export function addEffect(effects: Effect[] | undefined, effect: Effect): Effect[] {
+  return [...(effects ?? []), effect];
+}
+
+/** Remove the effect at `index` (VE.5.4). Out-of-range ⇒ unchanged. */
+export function removeEffect(effects: Effect[] | undefined, index: number): Effect[] {
+  const arr = effects ?? [];
+  if (index < 0 || index >= arr.length) return arr;
+  return arr.filter((_, i) => i !== index);
+}
+
+/** Reorder the stack: move `from` → `to` (VE.5.4). No-op (===-stable) when nothing moves. */
+export function moveEffect(effects: Effect[] | undefined, from: number, to: number): Effect[] {
+  const arr = effects ?? [];
+  if (from === to || from < 0 || from >= arr.length || to < 0 || to >= arr.length) return arr;
+  const next = [...arr];
+  const [moved] = next.splice(from, 1);
+  if (!moved) return arr;
+  next.splice(to, 0, moved);
+  return next;
+}
+
+/** Patch fields on the effect at `index` (VE.5.4) — `type` is never overwritten by the inspector. */
+export function updateEffect(
+  effects: Effect[] | undefined,
+  index: number,
+  patch: Record<string, number | string>,
+): Effect[] {
+  const arr = effects ?? [];
+  if (index < 0 || index >= arr.length) return arr;
+  return arr.map((e, i) => (i === index ? ({ ...e, ...patch } as Effect) : e));
 }
 
 export const MIN_SEGMENT_SEC = 0.2;
@@ -208,6 +457,89 @@ export function nudgeSegment(
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// ── structural verbs (VE.2) — pure segments[] mutations; ripple is automatic via placeEdl ──────
+
+/**
+ * Split a segment at a SOURCE-time second (VE.2.1). Produces two contiguous clips `<id>-a`/`<id>-b`
+ * sharing the original `src`/`cap`/`effects`; the first half keeps the incoming `transition`, the
+ * second half becomes a hard `cut` so the split is seamless (no dissolve at the new internal edge).
+ * Refuses a split that would leave < MIN_SEGMENT_SEC on either side (returns the array unchanged).
+ */
+export function splitSegment(segments: EdlSegment[], index: number, atSrcSec: number): EdlSegment[] {
+  const s = segments[index];
+  if (!s) return segments;
+  if (atSrcSec <= s.srcStart + MIN_SEGMENT_SEC || atSrcSec >= s.srcEnd - MIN_SEGMENT_SEC) return segments;
+  const cut = round2(atSrcSec);
+  const a: EdlSegment = { ...s, id: `${s.id}-a`, srcEnd: cut };
+  const b: EdlSegment = { ...s, id: `${s.id}-b`, srcStart: cut, transition: { kind: 'cut', durationFrames: 0 } };
+  const next = [...segments];
+  next.splice(index, 1, a, b);
+  return next;
+}
+
+/** Delete one segment (VE.2.3). placeEdl re-places the tail; never empties the cut (schema min 1). */
+export function deleteSegment(segments: EdlSegment[], index: number): EdlSegment[] {
+  if (segments.length <= 1 || index < 0 || index >= segments.length) return segments;
+  const next = [...segments];
+  next.splice(index, 1);
+  return next;
+}
+
+/** Delete every segment in `indexes` (VE.2.3 range delete). Never empties the cut; no-op stays ===. */
+export function deleteSegments(segments: EdlSegment[], indexes: number[]): EdlSegment[] {
+  const drop = new Set(indexes);
+  const next = segments.filter((_, i) => !drop.has(i));
+  if (next.length === 0 || next.length === segments.length) return segments;
+  return next;
+}
+
+/** Reorder: move the segment at `from` to index `to` (VE.2.4). Ripple is automatic. */
+export function moveSegment(segments: EdlSegment[], from: number, to: number): EdlSegment[] {
+  if (from === to || from < 0 || from >= segments.length) return segments;
+  const clampedTo = clamp(to, 0, segments.length - 1);
+  const next = [...segments];
+  const [moved] = next.splice(from, 1);
+  if (!moved) return segments;
+  next.splice(clampedTo, 0, moved);
+  return next;
+}
+
+/**
+ * Insert a b-roll cutaway on the single video lane (VE.3.3 / D31) AFTER `afterIndex` (use -1 to
+ * prepend). The new clip carries its own `src` (public-rooted) so the comp mounts it without a comp
+ * change; ripple is automatic. `afterIndex` past the end appends.
+ */
+export function insertSegment(
+  segments: EdlSegment[],
+  afterIndex: number,
+  seg: { id: string; src: string; srcStart: number; srcEnd: number; cap?: string },
+): EdlSegment[] {
+  const at = clamp(afterIndex + 1, 0, segments.length);
+  const next = [...segments];
+  const clip: EdlSegment = { id: seg.id, src: seg.src, srcStart: Math.max(0, round2(seg.srcStart)), srcEnd: round2(seg.srcEnd) };
+  if (seg.cap !== undefined) clip.cap = seg.cap;
+  next.splice(at, 0, clip);
+  return next;
+}
+
+/**
+ * Inverse of placeEdl for the razor (VE.2.2): which segment is under an OUTPUT-timeline frame, and
+ * the SOURCE second at that point. In a crossfade overlap the earlier segment wins; past the end
+ * (half-open) → null.
+ */
+export function playheadToSource(
+  placed: PlacedEdlSegment[],
+  fps: number,
+  frame: number,
+): { segIndex: number; atSrcSec: number } | null {
+  for (const seg of placed) {
+    if (frame >= seg.from && frame < seg.from + seg.durationInFrames) {
+      return { segIndex: seg.index, atSrcSec: seg.srcStart + (frame - seg.from) / fps };
+    }
+  }
+  return null;
+}
 
 /**
  * Project source-time captions onto the output timeline (generic remapCaptions). `capKey`
@@ -278,6 +610,106 @@ export function applyRemappedWordEdit(
       : resizeWord(src, word.srcIndex, edit.kind === 'resize-start' ? 'start' : 'end', deltaMs);
   if (edited === src) return sources;
   return { ...sources, [word.capKey]: edited };
+}
+
+// ── range selection (VE.1 — the keystone: a {startMs,endMs} OUTPUT-time window) ──────────────
+
+/** A caption word identified by its source array + index (stable across remaps). */
+export interface WordId {
+  capKey: string;
+  srcIndex: number;
+}
+
+/** What a timeline range window touches — the noun the manual verbs + Ask-Editor-Agent act on. */
+export interface RangeSpan {
+  /** normalized window (lo ≤ hi), in OUTPUT-timeline ms. */
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+  /** indexes into the placed/segments array whose OUTPUT window overlaps the range. */
+  segIndexes: number[];
+  /** caption words whose on-screen span overlaps the range. */
+  wordIds: WordId[];
+  /** distinct caption-set keys among the spanned words. */
+  capKeys: string[];
+  /** audio tracks whose playback overlaps the range (see the duration caveat below). */
+  audioTrackIds: string[];
+  /** the on-disk docs the window spans, ordered segments → captions → audio (for the agent). */
+  affectedDocs: string[];
+}
+
+export interface RangeSpanInput {
+  placed: PlacedEdlSegment[];
+  fps: number;
+  /** remapped (output-time) caption words; omit for a captions-less cut. */
+  words?: RemappedWord[];
+  /** audio-mix tracks; omit for a silent cut. */
+  audio?: AudioTrack[];
+  /** the segments doc filename (multi-doc projects); default 'segments.json'. */
+  segDocName?: string;
+  /** capKey → caption filename, e.g. { '': 'captions.json', 'subs': 'captions-subs.json' }. */
+  capDocNames?: Record<string, string>;
+}
+
+/** Half-open overlap of [aLo,aHi) with [bLo,bHi). A zero-width window overlaps nothing. */
+const overlaps = (aLo: number, aHi: number, bLo: number, bHi: number): boolean =>
+  aHi > aLo && bHi > bLo && aLo < bHi && bLo < aHi;
+
+/**
+ * Compute what an OUTPUT-time window touches. Pure + deterministic (VE.1.1): segments by their
+ * placed output window, words by their on-screen span, audio tracks by their playback start.
+ *
+ * Audio caveat: `audio-mix.json` tracks carry no duration, so a track is counted as spanned when
+ * it STARTS at/before the window end (`offsetMs < endMs`) — i.e. it is assumed to play to the end
+ * of the timeline. This is intentionally inclusive (range-scoped audio, VE.7, wants every track
+ * that could be audible in the window).
+ */
+export function rangeSpan(input: RangeSpanInput, aMs: number, bMs: number): RangeSpan {
+  const startMs = Math.min(aMs, bMs);
+  const endMs = Math.max(aMs, bMs);
+  const segDoc = input.segDocName ?? 'segments.json';
+  const capDocNames = input.capDocNames ?? { '': 'captions.json' };
+
+  const segIndexes: number[] = [];
+  for (const seg of input.placed) {
+    const outStart = (seg.from / input.fps) * 1000;
+    const outEnd = ((seg.from + seg.durationInFrames) / input.fps) * 1000;
+    if (overlaps(outStart, outEnd, startMs, endMs)) segIndexes.push(seg.index);
+  }
+
+  const wordIds: WordId[] = [];
+  const capKeySet = new Set<string>();
+  for (const w of input.words ?? []) {
+    if (overlaps(w.startMs, w.endMs, startMs, endMs)) {
+      wordIds.push({ capKey: w.capKey, srcIndex: w.srcIndex });
+      capKeySet.add(w.capKey);
+    }
+  }
+
+  const audioTrackIds: string[] = [];
+  for (const t of input.audio ?? []) {
+    const offsetMs = t.offsetSec * 1000;
+    if (endMs > startMs && offsetMs < endMs) audioTrackIds.push(t.id);
+  }
+
+  const affectedDocs: string[] = [];
+  if (segIndexes.length) affectedDocs.push(segDoc);
+  for (const k of capKeySet) {
+    const doc = capDocNames[k] ?? (k ? `captions-${k}.json` : 'captions.json');
+    if (!affectedDocs.includes(doc)) affectedDocs.push(doc);
+  }
+  if (audioTrackIds.length) affectedDocs.push('audio-mix.json');
+
+  return {
+    startMs,
+    endMs,
+    durationMs: endMs - startMs,
+    segIndexes,
+    wordIds,
+    capKeys: [...capKeySet],
+    audioTrackIds,
+    affectedDocs,
+  };
 }
 
 // ── audio math (UIP4.2) ─────────────────────────────────────────────────────────

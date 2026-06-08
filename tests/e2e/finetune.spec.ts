@@ -131,6 +131,192 @@ test('finetune: render-preview picker lists renders; an unloadable render falls 
   expect(guard.errors()).toEqual([]);
 });
 
+test('finetune: drag on the ruler selects a time range (band + range inspector), Esc clears', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await openEditor(page);
+
+  const ruler = page.getByTestId('ft-ruler');
+  const rb = await ruler.boundingBox();
+  if (!rb) throw new Error('no ruler box');
+  const y = rb.y + rb.height / 2;
+
+  // drag across most of the ruler → a real range (the >3px move threshold distinguishes a drag from a seek-tap)
+  await page.mouse.move(rb.x + 8, y);
+  await page.mouse.down();
+  await page.mouse.move(rb.x + rb.width * 0.5, y, { steps: 8 });
+  await page.mouse.move(rb.x + rb.width - 8, y, { steps: 8 });
+  await page.mouse.up();
+
+  // the band spans the tracks and the range inspector shows the window summary
+  await expect(page.getByTestId('ft-range-band')).toBeVisible();
+  await expect(page.getByTestId('ft-inspector')).toContainText('range');
+  await expect(page.getByTestId('ft-range-window')).toBeVisible();
+  await expect(page.getByTestId('ft-range-spans')).toContainText('word'); // e2e-demo has captions in the window
+
+  // Esc on the focused editor clears the range (band gone)
+  await page.getByTestId('finetune').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('ft-range-band')).toHaveCount(0);
+
+  expect(guard.errors()).toEqual([]);
+});
+
+test('finetune: structural verbs — split @ playhead → delete → reorder → save → reload persists the cut', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  // dedicated EDL project (no captions) so the SEG track + structural verbs are the focus
+  await page.goto('/#/finetune/e2e-edl');
+  await expect(page.getByTestId('finetune')).toBeVisible();
+
+  // the seeded 3-segment EDL renders on the SEG track
+  await expect(page.getByTestId('ft-segment')).toHaveCount(3);
+
+  // razor: seek the playhead into s2 (1.5s @ 60px/s = +90px on the ruler), then press S to split
+  const ruler = page.getByTestId('ft-ruler');
+  const rb = await ruler.boundingBox();
+  if (!rb) throw new Error('no ruler box');
+  await page.mouse.click(rb.x + 1.5 * PX_PER_SEC, rb.y + rb.height / 2);
+  await page.getByTestId('finetune').focus();
+  await page.keyboard.press('s');
+  await expect(page.getByTestId('ft-segment')).toHaveCount(4);
+  await expect(page.locator('[data-segment="s2-a"]')).toBeVisible();
+  await expect(page.locator('[data-segment="s2-b"]')).toBeVisible();
+
+  // delete + ripple: select s1, hit the inspector delete verb
+  await page.locator('[data-segment="s1"]').click();
+  await page.getByTestId('ft-seg-delete').click();
+  await expect(page.getByTestId('ft-segment')).toHaveCount(3);
+  await expect(page.locator('[data-segment="s1"]')).toHaveCount(0);
+
+  // reorder: select s3, move it earlier (◀) → order becomes s2-a, s3, s2-b
+  await page.locator('[data-segment="s3"]').click();
+  await page.getByTestId('ft-seg-move-left').click();
+  const segLocator = page.getByTestId('ft-segment');
+  const segCount = await segLocator.count();
+  const domOrder: (string | null)[] = [];
+  for (let i = 0; i < segCount; i++) domOrder.push(await segLocator.nth(i).getAttribute('data-segment'));
+  expect(domOrder).toEqual(['s2-a', 's3', 's2-b']);
+
+  // save → the persisted segments.json reflects the restructured cut (by value, via the API)
+  await page.getByTestId('ft-save').click();
+  await expect(page.getByTestId('ft-save-status')).toContainText('saved segments.json');
+
+  await page.reload();
+  await expect(page.getByTestId('ft-segment')).toHaveCount(3);
+  const state = await (await page.request.get('/api/projects/e2e-edl/finetune')).json();
+  const seg = state.docs.find((d: { name: string }) => d.name === 'segments.json');
+  expect(seg.data.segments.map((s: { id: string }) => s.id)).toEqual(['s2-a', 's3', 's2-b']);
+  // the split halves keep contiguous source + the new internal edge is a hard cut
+  const a = seg.data.segments.find((s: { id: string }) => s.id === 's2-a');
+  const b = seg.data.segments.find((s: { id: string }) => s.id === 's2-b');
+  expect(a.srcEnd).toBe(1.5);
+  expect(b.srcStart).toBe(1.5);
+  expect(b.transition).toEqual({ kind: 'cut', durationFrames: 0 });
+
+  expect(guard.errors()).toEqual([]);
+});
+
+test('finetune: b-roll insert — pick footage → cutaway segment → save → reload persists src', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.goto('/#/finetune/e2e-edl-broll');
+  await expect(page.getByTestId('finetune')).toBeVisible();
+  await expect(page.getByTestId('ft-segment')).toHaveCount(3);
+
+  // open the b-roll picker (in the SEG track header) and choose the seeded footage
+  await page.getByTestId('ft-broll-add').click();
+  const pick = page.getByTestId('ft-broll-pick');
+  await expect(pick).toBeVisible();
+  await pick.selectOption('public/e2e-edl-broll/broll.mp4');
+
+  // a cutaway segment is inserted (4 blocks); its pill shows the footage filename
+  await expect(page.getByTestId('ft-segment')).toHaveCount(4);
+  await expect(page.locator('[data-segment^="broll-"]')).toHaveCount(1);
+  await expect(page.locator('[data-segment^="broll-"]')).toContainText('broll.mp4');
+
+  // save → reload → the cutaway persisted carrying its public-rooted src
+  await page.getByTestId('ft-save').click();
+  await expect(page.getByTestId('ft-save-status')).toContainText('saved segments.json');
+  await page.reload();
+  await expect(page.getByTestId('ft-segment')).toHaveCount(4);
+  const state = await (await page.request.get('/api/projects/e2e-edl-broll/finetune')).json();
+  const seg = state.docs.find((d: { name: string }) => d.name === 'segments.json');
+  const broll = seg.data.segments.find((s: { id: string }) => s.id.startsWith('broll-'));
+  expect(broll.src).toBe('e2e-edl-broll/broll.mp4');
+  expect(broll.srcEnd).toBeGreaterThan(0);
+
+  expect(guard.errors()).toEqual([]);
+});
+
+test('finetune: typed transition — set a kind on a segment edge → save → reload persists it', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.goto('/#/finetune/e2e-edl-tr');
+  await expect(page.getByTestId('finetune')).toBeVisible();
+  await expect(page.getByTestId('ft-segment')).toHaveCount(3);
+
+  // select s2 (not the first clip → it has an incoming edge), set the transition to a wipe-from-right
+  await page.locator('[data-segment="s2"]').click();
+  await page.getByTestId('ft-seg-transition-kind').selectOption('wipe');
+  await page.getByTestId('ft-seg-transition-dir').selectOption('r');
+  await page.getByTestId('ft-seg-transition-dur').fill('12');
+  // the incoming-edge badge appears on the block
+  await expect(page.locator('[data-segment="s2"] [data-testid="ft-seg-transition-badge"]')).toBeVisible();
+
+  await page.getByTestId('ft-save').click();
+  await expect(page.getByTestId('ft-save-status')).toContainText('saved segments.json');
+  await page.reload();
+  const state = await (await page.request.get('/api/projects/e2e-edl-tr/finetune')).json();
+  const seg = state.docs.find((d: { name: string }) => d.name === 'segments.json');
+  const s2 = seg.data.segments.find((s: { id: string }) => s.id === 's2');
+  expect(s2.transition).toEqual({ kind: 'wipe', durationFrames: 12, direction: 'r' });
+  // s1 (the first clip) has no transition control / no transition field
+  const s1 = seg.data.segments.find((s: { id: string }) => s.id === 's1');
+  expect(s1.transition).toBeUndefined();
+
+  expect(guard.errors()).toEqual([]);
+});
+
+test('finetune: per-clip effects — add color/transform/speed on a clip → save → reload persists the stack', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.goto('/#/finetune/e2e-edl-fx');
+  await expect(page.getByTestId('finetune')).toBeVisible();
+  await expect(page.getByTestId('ft-segment')).toHaveCount(3);
+
+  // select s1 (effects apply to ANY clip, incl. the first) and open the effects sub-panel
+  await page.locator('[data-segment="s1"]').click();
+  await expect(page.getByTestId('ft-seg-fx')).toBeVisible();
+
+  // add a colorCorrect effect → set saturation
+  await page.getByTestId('ft-seg-fx-add-colorCorrect').click();
+  await expect(page.getByTestId('ft-seg-fx-item')).toHaveCount(1);
+  await page.getByTestId('ft-seg-fx-saturation').fill('1.4');
+
+  // add a transform → set scale
+  await page.getByTestId('ft-seg-fx-add-transform').click();
+  await expect(page.getByTestId('ft-seg-fx-item')).toHaveCount(2);
+  await page.getByTestId('ft-seg-fx-scale').fill('1.25');
+
+  // add a speed → set rate
+  await page.getByTestId('ft-seg-fx-add-speed').click();
+  await expect(page.getByTestId('ft-seg-fx-item')).toHaveCount(3);
+  await page.getByTestId('ft-seg-fx-speed').fill('1.5');
+
+  // save → reload → the persisted segments.json carries the ordered effects stack (by value, via API)
+  await page.getByTestId('ft-save').click();
+  await expect(page.getByTestId('ft-save-status')).toContainText('saved segments.json');
+  await page.reload();
+  const state = await (await page.request.get('/api/projects/e2e-edl-fx/finetune')).json();
+  const seg = state.docs.find((d: { name: string }) => d.name === 'segments.json');
+  const s1 = seg.data.segments.find((s: { id: string }) => s.id === 's1');
+  expect(s1.effects.map((e: { type: string }) => e.type)).toEqual(['colorCorrect', 'transform', 'speed']);
+  expect(s1.effects[0].saturation).toBe(1.4);
+  expect(s1.effects[1].scale).toBe(1.25);
+  expect(s1.effects[2].rate).toBe(1.5);
+  // other clips stay un-effected (no injected defaults)
+  const s2 = seg.data.segments.find((s: { id: string }) => s.id === 's2');
+  expect(s2.effects).toBeUndefined();
+
+  expect(guard.errors()).toEqual([]);
+});
+
 test('finetune: Ctrl+Z undoes a drag (before save)', async ({ page }) => {
   const guard = attachConsoleGuard(page);
   await openEditor(page);

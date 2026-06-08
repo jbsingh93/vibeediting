@@ -15,6 +15,8 @@ import {
   visibleTabs,
   AUDIO_CATEGORIES,
   assetUrl,
+  assetToSegmentSrc,
+  assetBasename,
   previewKind,
 } from '../assets';
 import type { AssetInfo } from '../types';
@@ -83,6 +85,19 @@ describe('split client surface (tabs / actions)', () => {
     expect(assetUrl({ relPath: 'out/work/p/motion/clip-v1.mp4' })).toBe('/work/p/motion/clip-v1.mp4');
     expect(assetUrl({ relPath: 'test-video/p/refs/competitor.mp4' })).toBe('/deliver/p/refs/competitor.mp4');
     expect(assetUrl({ relPath: 'src/p/Comp.tsx' })).toBeNull();
+  });
+
+  it('assetToSegmentSrc strips the public/ prefix (VE.3 b-roll insert src convention)', () => {
+    expect(assetToSegmentSrc({ relPath: 'public/p/clip.mp4' })).toBe('p/clip.mp4');
+    expect(assetToSegmentSrc({ relPath: 'public\\p\\clip.mp4' })).toBe('p/clip.mp4'); // win sep
+    // a non-public (acquired refs) path keeps its path → reads as missing until copied to public/
+    expect(assetToSegmentSrc({ relPath: 'test-video/p/refs/b.mp4' })).toBe('test-video/p/refs/b.mp4');
+  });
+
+  it('assetBasename takes the final path segment', () => {
+    expect(assetBasename('public/p/sub/clip.mp4')).toBe('clip.mp4');
+    expect(assetBasename('p/clip.mp4')).toBe('clip.mp4');
+    expect(assetBasename('clip.mp4')).toBe('clip.mp4');
   });
 
   it('previewKind: footage→video, any audio→audio, image→image, else none', () => {

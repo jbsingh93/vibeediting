@@ -227,4 +227,27 @@ describe('formatSelectionForAgent', () => {
     const s = formatSelectionForAgent({ project: 'p', kind: 'word', label: '“sværme”', detail: 'captions.json word 1, on screen 0.70s–1.20s' });
     expect(s).toBe('[Selected in the editor: word “sværme” — captions.json word 1, on screen 0.70s–1.20s]');
   });
+
+  it('a range selection emits the scoped-edit framing (D29) with m:ss + affected docs', () => {
+    const s = formatSelectionForAgent({
+      project: 'p',
+      kind: 'range',
+      label: '0:03–1:18',
+      detail: 'ignored for range',
+      timeWindowMs: { startMs: 3200, endMs: 78000 },
+      affectedDocs: ['segments.json', 'captions.json'],
+    });
+    expect(s).toBe('[Editing range 0:03–1:18 · affects segments.json, captions.json]');
+  });
+
+  it('a range with no affectedDocs defaults to segments.json', () => {
+    const s = formatSelectionForAgent({
+      project: 'p',
+      kind: 'range',
+      label: '0:00–0:02',
+      detail: '',
+      timeWindowMs: { startMs: 0, endMs: 2000 },
+    });
+    expect(s).toBe('[Editing range 0:00–0:02 · affects segments.json]');
+  });
 });

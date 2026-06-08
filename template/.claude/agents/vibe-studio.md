@@ -69,7 +69,16 @@ exactly four truths, and a "finished" video that skips them is NOT finished:
      `Caption[]` — also for kinetic/motion text; convert frames → ms with `frame/fps*1000`).
    - `audio-mix.json` → `{ "masterLufs": -14, "tracks": [{ "id", "role": "vo"|"bgm"|"sfx",
      "src", "offsetSec", "gainDb", "duck"? }] }` (gain in dB, NOT 0–1 volume).
-   - `segments.json` → `{ "fps", "segments": [{ "id", "srcStart", "srcEnd" }] }` (real-footage cuts).
+   - `segments.json` → `{ "fps", "crossfadeFrames", "segments": [{ "id", "srcStart", "srcEnd",
+     "src"?, "cap"?, "transition"?, "effects"? }] }` (real-footage cuts; the light-NLE cut model).
+     - `transition?` (incoming edge): `{ "kind": "cut"|"dissolve"|"fade"|"slide"|"wipe",
+       "durationFrames", "direction"?: "l"|"r"|"u"|"d" }`. OMIT it for the default `crossfadeFrames`
+       dissolve — only set it to override one edge. `direction` applies to slide/wipe only.
+     - `effects?` (ordered stack on the clip): array of `{ "type": "transform", "scale"?, "x"?, "y"? }`
+       | `{ "type": "opacity", "value": 0..1 }` | `{ "type": "speed", "rate" }` | `{ "type":
+       "colorCorrect", "brightness"?, "contrast"?, "saturation"? }`. (`{ "type": "lut", "src" }` is
+       schema-valid but its renderer ships post-launch — avoid until then.) OMIT `effects` for a
+       plain clip. These render IDENTICALLY in the cockpit preview and the headless render.
    - Every OTHER knob (colors, font sizes, spring constants, scene frame ranges…) → `props.json`.
 
 If a turn arrives prefixed with a `[Cockpit contract — NOT yet satisfied …]` note, fix those items

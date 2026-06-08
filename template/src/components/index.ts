@@ -16,6 +16,9 @@ export type { Brand } from './BrandContext';
 // Caption schema + utilities (incl. the `Caption` type).
 export * from './captions';
 
+// EDL (segments.json) schema + utilities — the canonical cut contract (D25/D32).
+export * from './edl';
+
 // Caption renderers.
 export { KineticCaptions } from './KineticCaptions';
 

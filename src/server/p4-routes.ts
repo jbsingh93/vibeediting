@@ -63,6 +63,36 @@ const captionsSchema = z.array(captionSchema);
 
 export type FinetuneDocKind = 'captions' | 'segments' | 'audio-mix' | 'props';
 
+// ── EDL transition + effects (LOCAL mirror of template/src/components/edl.ts) ──────
+//
+// Contract owner: template/src/components/edl.ts (the EdlTimeline render comp imports it).
+// This package cannot import template code, so these mirror that file 1:1. Both `transition`
+// and `effects` are OPTIONAL: an older segments.json with neither parses, validates, and
+// renders unchanged (absent transition ⇒ global crossfadeFrames dissolve; absent effects ⇒
+// no-op). If the template contract changes shape, change BOTH (the template stays authoritative).
+export const transitionSchema = z.object({
+  kind: z.enum(['cut', 'dissolve', 'fade', 'slide', 'wipe']),
+  durationFrames: z.number().int().min(0),
+  direction: z.enum(['l', 'r', 'u', 'd']).optional(),
+});
+export const effectSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('transform'),
+    scale: z.number().positive().optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+  }),
+  z.object({ type: z.literal('opacity'), value: z.number().min(0).max(1) }),
+  z.object({ type: z.literal('speed'), rate: z.number().positive() }),
+  z.object({
+    type: z.literal('colorCorrect'),
+    brightness: z.number().min(0).optional(),
+    contrast: z.number().min(0).optional(),
+    saturation: z.number().min(0).optional(),
+  }),
+  z.object({ type: z.literal('lut'), src: z.string().min(1) }),
+]);
+
 /** EDL doc: single-source shape (top-level src) or per-segment shape (per-segment src + cap). */
 export const segmentSchema = z.object({
   id: z.string().min(1),
@@ -70,6 +100,10 @@ export const segmentSchema = z.object({
   srcEnd: z.number().positive(),
   src: z.string().optional(),
   cap: z.string().optional(),
+  /** D26: per-edge transition (incoming edge). Absent ⇒ global crossfadeFrames dissolve. */
+  transition: transitionSchema.optional(),
+  /** D27: ordered per-clip effects stack. Absent ⇒ no-op. */
+  effects: z.array(effectSchema).optional(),
 });
 export const segmentsDocSchema = z.object({
   fps: z.number().positive(),

@@ -69,27 +69,73 @@ export function Ruler({
   durationSec,
   pxPerSec,
   onSeek,
+  onRangeStart,
+  onRangeMove,
+  onRangeEnd,
 }: {
   durationSec: number;
   pxPerSec: number;
   onSeek: (sec: number) => void;
+  /** VE.1.2: dragging on the ruler selects a time range (a click still seeks). */
+  onRangeStart?: () => void;
+  onRangeMove?: (startSec: number, endSec: number) => void;
+  onRangeEnd?: (startSec: number, endSec: number) => void;
 }) {
   const step = tickStepSec(pxPerSec);
   const ticks: number[] = [];
   for (let t = 0; t <= durationSec; t += step) ticks.push(t);
+  const clampSec = (x: number, left: number) => Math.max(0, Math.min(durationSec, (x - left) / pxPerSec));
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const startSec = clampSec(e.clientX, rect.left);
+    // No range handlers wired (or not draggable) → preserve the legacy click-to-seek behavior.
+    if (!onRangeMove && !onRangeEnd) {
+      onSeek(startSec);
+      return;
+    }
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    let moved = false;
+    onRangeStart?.();
+    const move = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - e.clientX) > 3) moved = true;
+      if (moved) {
+        const cur = clampSec(ev.clientX, rect.left);
+        onRangeMove?.(Math.min(startSec, cur), Math.max(startSec, cur));
+      }
+    };
+    const up = (ev: PointerEvent) => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      try {
+        el.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      if (!moved) {
+        onSeek(startSec); // a tap = seek, not a zero-width range
+        return;
+      }
+      const cur = clampSec(ev.clientX, rect.left);
+      onRangeEnd?.(Math.min(startSec, cur), Math.max(startSec, cur));
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
   return (
     <div
       data-testid="ft-ruler"
-      onPointerDown={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        onSeek(Math.max(0, Math.min(durationSec, (e.clientX - rect.left) / pxPerSec)));
-      }}
+      onPointerDown={onPointerDown}
       style={{
         position: 'relative',
         height: 22,
         width: durationSec * pxPerSec,
         borderBottom: '1px solid var(--hairline)',
-        cursor: 'pointer',
+        cursor: onRangeMove ? 'ew-resize' : 'pointer',
         flex: 'none',
       }}
     >
@@ -130,6 +176,40 @@ export function Playhead({ sec, pxPerSec, height }: { sec: number; pxPerSec: num
         opacity: 0.8,
         pointerEvents: 'none',
         zIndex: 6,
+      }}
+    />
+  );
+}
+
+/** VE.1.2: the range selection band — a translucent overlay spanning every track row. */
+export function SelectionBand({
+  startSec,
+  endSec,
+  pxPerSec,
+  height,
+}: {
+  startSec: number;
+  endSec: number;
+  pxPerSec: number;
+  height: number;
+}) {
+  const left = startSec * pxPerSec;
+  const width = Math.max(1, (endSec - startSec) * pxPerSec);
+  return (
+    <div
+      data-testid="ft-range-band"
+      aria-hidden
+      style={{
+        position: 'absolute',
+        left,
+        top: 0,
+        width,
+        height,
+        background: 'color-mix(in srgb, var(--accent) 16%, transparent)',
+        borderLeft: '1px solid var(--accent)',
+        borderRight: '1px solid var(--accent)',
+        pointerEvents: 'none',
+        zIndex: 5,
       }}
     />
   );

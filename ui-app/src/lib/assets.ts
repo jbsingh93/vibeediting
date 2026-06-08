@@ -97,6 +97,20 @@ export function assetUrl(a: Pick<AssetInfo, 'relPath'>): string | null {
   return null;
 }
 
+/**
+ * The EDL segment `src` (public-rooted, like `staticFile()` takes) for a footage asset — the
+ * `relPath` with the leading `public/` stripped (VE.3.3). A clip that isn't under `public/` keeps
+ * its path verbatim and will read as missing (`srcExists` ⚠) until it is copied into `public/`.
+ */
+export function assetToSegmentSrc(a: Pick<AssetInfo, 'relPath'>): string {
+  return a.relPath.replace(/\\/g, '/').replace(/^public\//, '');
+}
+
+/** Final path segment of a relPath, for compact pill/label text. */
+export function assetBasename(relPath: string): string {
+  return relPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? relPath;
+}
+
 /** What an inline preview should mount for this asset (null = not previewable). */
 export function previewKind(a: Pick<AssetInfo, 'category'>): 'video' | 'audio' | 'image' | null {
   if (a.category === 'footage') return 'video';

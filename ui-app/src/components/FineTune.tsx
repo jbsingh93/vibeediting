@@ -33,6 +33,13 @@ import {
   nudgeSegment,
   pickDefaultRender,
   placeEdl,
+  rangeSpan,
+  splitSegment,
+  deleteSegment,
+  deleteSegments,
+  moveSegment,
+  insertSegment,
+  playheadToSource,
   remapEdlCaptions,
   resetToBaseline,
   resizeWord,
@@ -43,13 +50,14 @@ import {
   voWindows,
   xToMs,
 } from '../lib/finetune';
-import { AUDIO_CATEGORIES } from '../lib/assets';
+import { AUDIO_CATEGORIES, assetBasename, assetToSegmentSrc } from '../lib/assets';
+import { BrollPicker } from './finetune/BrollPicker';
 import { ASSETS_RELOAD_EVENT } from '../lib/upload';
 import { subscribe as subscribeWs } from '../lib/ws';
 import type { ManifestWsMessage } from '../lib/types';
 import { capFileName, capKeyForFile, edlDefaults } from '../lib/edl-registry';
 import { diffDocs, type DiffRow } from '../lib/diff';
-import { setSelection } from '../lib/selection';
+import { fmtRangeTime, setSelection } from '../lib/selection';
 import { SCHEMA_LOADERS, hasPropsSchema, type SchemaEntry } from '../lib/schema-registry';
 import { findBlockArrays, getAtPath, setAtPath } from '../lib/schema-form';
 import { COMP_LOADERS, type CompId } from '../lib/comp-registry';
@@ -64,11 +72,13 @@ import { AudioTracksUI } from './finetune/AudioTracksUI';
 import {
   AudioInspector,
   InspectorShell,
+  RangeInspector,
   SchemaForm,
   SegmentInspector,
+  VerbBtn,
   WordInspector,
 } from './finetune/Inspector';
-import { GhostBtn, Playhead, Ruler, TrackRow } from './finetune/timeline-ui';
+import { GhostBtn, Playhead, Ruler, SelectionBand, TrackRow } from './finetune/timeline-ui';
 
 // ── the editing model ───────────────────────────────────────────────────────────
 
@@ -89,6 +99,7 @@ interface LoadedCtx {
   baselines: Record<string, CaptionWord[]>;
   srcExists: Record<string, boolean>;
   audioAssets: AssetInfo[];
+  footageAssets: AssetInfo[];
   schemaEntry: SchemaEntry | null;
   propsOnDisk: boolean;
   segHadEmphasis: boolean;
@@ -101,6 +112,7 @@ type Sel =
   | { t: 'seg'; index: number }
   | { t: 'scene'; index: number }
   | { t: 'audio'; id: string }
+  | { t: 'range'; startMs: number; endMs: number }
   | null;
 
 const dim = { width: 1080, height: 1920 };
@@ -132,6 +144,9 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
   const [reloadTick, setReloadTick] = useState(0);
   const playerRef = useRef<PlayerRef>(null);
   const dragBase = useRef<EditModel | null>(null);
+  // VE.1.2: a range drag on the ruler can emit a trailing click that would bubble to the timeline
+  // background and clear the just-set selection — swallow exactly that one click.
+  const suppressClearRef = useRef(false);
   const lastGoodDuration = useRef(300);
 
   const model = history?.present ?? null;
@@ -181,6 +196,9 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
         for (const a of publicAssets) srcExists[a.relPath.replace(/^public\//, '')] = true;
         for (const d of docs) if (d.srcExists) Object.assign(srcExists, d.srcExists);
         const audioAssets = publicAssets.filter((a) => AUDIO_CATEGORIES.has(a.category)); // UIP6.6 split
+        // VE.3.1: footage for the b-roll picker — all origins (public + acquired refs); only
+        // public-rooted clips mount in the comp (srcExists flags the rest with a ⚠ badge).
+        const footageAssets = assetsRes.assets.filter((a) => a.category === 'footage');
 
         // segments doc (the EDL) — user-selectable when several exist
         const segDocs = docs.filter((d) => d.kind === 'segments');
@@ -241,6 +259,7 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
           baselines,
           srcExists,
           audioAssets,
+          footageAssets,
           schemaEntry,
           propsOnDisk: !!propsDoc,
           segHadEmphasis,
@@ -379,6 +398,77 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
   const transient = useCallback((next: EditModel) => {
     setHistory((h) => (h ? { ...h, present: next } : h));
   }, []);
+
+  // ── VE.2: structural verbs (split · delete+ripple · reorder) — pure segments[] edits via commit ──
+  const playheadRef = useRef(playheadFrame);
+  playheadRef.current = playheadFrame;
+  const selRef = useRef<Sel>(sel);
+  selRef.current = sel;
+
+  const splitAtPlayhead = useCallback(() => {
+    const m = modelRef.current;
+    if (!m?.segDoc) return;
+    const placedNow = placeEdl(m.segDoc.segments, m.segDoc.fps, m.segDoc.crossfadeFrames);
+    const hit = playheadToSource(placedNow, m.segDoc.fps, playheadRef.current);
+    if (!hit) return;
+    const segs = splitSegment(m.segDoc.segments, hit.segIndex, hit.atSrcSec);
+    if (segs === m.segDoc.segments) return;
+    commit({ ...m, segDoc: { ...m.segDoc, segments: segs } });
+    setSel({ t: 'seg', index: hit.segIndex });
+  }, [commit]);
+
+  const removeSegment = useCallback((index: number) => {
+    const m = modelRef.current;
+    if (!m?.segDoc) return;
+    const segs = deleteSegment(m.segDoc.segments, index);
+    if (segs === m.segDoc.segments) return;
+    commit({ ...m, segDoc: { ...m.segDoc, segments: segs } });
+    setSel(null);
+  }, [commit]);
+
+  const removeSegments = useCallback((indexes: number[]) => {
+    const m = modelRef.current;
+    if (!m?.segDoc) return;
+    const segs = deleteSegments(m.segDoc.segments, indexes);
+    if (segs === m.segDoc.segments) return;
+    commit({ ...m, segDoc: { ...m.segDoc, segments: segs } });
+    setSel(null);
+  }, [commit]);
+
+  const reorderSegment = useCallback((from: number, to: number) => {
+    const m = modelRef.current;
+    if (!m?.segDoc) return;
+    const segs = moveSegment(m.segDoc.segments, from, to);
+    if (segs === m.segDoc.segments) return;
+    commit({ ...m, segDoc: { ...m.segDoc, segments: segs } });
+    setSel({ t: 'seg', index: Math.max(0, Math.min(segs.length - 1, to)) });
+  }, [commit]);
+
+  // VE.3: insert a b-roll cutaway on the single lane after the selected/playhead segment
+  const DEFAULT_BROLL_SEC = 3;
+  const insertBroll = useCallback(
+    (asset: AssetInfo, naturalDurationSec: number | null) => {
+      const m = modelRef.current;
+      if (!m?.segDoc) return;
+      const src = assetToSegmentSrc(asset);
+      const len = naturalDurationSec && naturalDurationSec > 0 ? naturalDurationSec : DEFAULT_BROLL_SEC;
+      const placedNow = placeEdl(m.segDoc.segments, m.segDoc.fps, m.segDoc.crossfadeFrames);
+      // insert AFTER the selected segment, else after the segment under the playhead, else at the end
+      const s = selRef.current;
+      const afterIndex =
+        s?.t === 'seg'
+          ? s.index
+          : playheadToSource(placedNow, m.segDoc.fps, playheadRef.current)?.segIndex ?? m.segDoc.segments.length - 1;
+      const base = assetBasename(asset.relPath).replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '-') || 'broll';
+      const taken = new Set(m.segDoc.segments.map((x) => x.id));
+      let id = `broll-${base}`;
+      for (let n = 2; taken.has(id); n++) id = `broll-${base}-${n}`;
+      const segs = insertSegment(m.segDoc.segments, afterIndex, { id, src, srcStart: 0, srcEnd: len });
+      commit({ ...m, segDoc: { ...m.segDoc, segments: segs } });
+      setSel({ t: 'seg', index: afterIndex + 1 });
+    },
+    [commit],
+  );
 
   const beginDrag = useCallback(() => {
     dragBase.current = modelRef.current;
@@ -588,6 +678,58 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
         return;
       }
       if (typing || !model) return;
+      if (e.key === 'Escape' && sel) {
+        e.preventDefault();
+        setSel(null);
+        return;
+      }
+      // VE.2 razor: S splits the segment under the playhead
+      if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey && model.segDoc) {
+        e.preventDefault();
+        splitAtPlayhead();
+        return;
+      }
+      // VE.2 delete+ripple: the selected segment, or every segment in the selected range
+      if ((e.key === 'Delete' || e.key === 'Backspace') && model.segDoc) {
+        if (sel?.t === 'seg') {
+          e.preventDefault();
+          removeSegment(sel.index);
+          return;
+        }
+        if (sel?.t === 'range') {
+          e.preventDefault();
+          const span = rangeSpan(
+            {
+              placed,
+              fps,
+              words: chips,
+              audio: model.audioMix.tracks,
+              segDocName: model.segDocName ?? 'segments.json',
+              capDocNames: ctx?.captionFiles,
+            },
+            sel.startMs,
+            sel.endMs,
+          );
+          removeSegments(span.segIndexes);
+          return;
+        }
+      }
+      // VE.1.2: nudge the range — plain arrows move the whole window, Shift resizes the end edge.
+      if (sel?.t === 'range' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        const step = (e.key === 'ArrowLeft' ? -1 : 1) * 100;
+        const durMs = durationSec * 1000;
+        const cur = sel;
+        if (e.shiftKey) {
+          const endMs = Math.max(cur.startMs + 50, Math.min(durMs, cur.endMs + step));
+          setSel({ t: 'range', startMs: cur.startMs, endMs });
+        } else {
+          const width = cur.endMs - cur.startMs;
+          const startMs = Math.max(0, Math.min(durMs - width, cur.startMs + step));
+          setSel({ t: 'range', startMs, endMs: startMs + width });
+        }
+        return;
+      }
       if (sel?.t === 'word' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         e.preventDefault();
         const delta = (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 100 : 10);
@@ -600,7 +742,7 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
         }
       }
     },
-    [model, sel, chips, placed, commit, editWord, doSave],
+    [model, sel, chips, placed, fps, ctx, commit, editWord, doSave, durationSec, splitAtPlayhead, removeSegment, removeSegments],
   );
 
   // ── playhead sync ─────────────────────────────────────────────────────────────
@@ -654,8 +796,30 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
       if (t) {
         setSelection({ project, kind: 'audio', label: `“${t.id}”`, detail: `audio-mix.json ${t.role} track, offset ${t.offsetSec.toFixed(2)}s, gain ${t.gainDb} dB` });
       }
+    } else if (sel.t === 'range') {
+      const span = rangeSpan(
+        {
+          placed,
+          fps,
+          words: chips,
+          audio: model.audioMix.tracks,
+          segDocName: model.segDocName ?? 'segments.json',
+          capDocNames: ctx?.captionFiles,
+        },
+        sel.startMs,
+        sel.endMs,
+      );
+      const docs = span.affectedDocs.length ? span.affectedDocs.join(', ') : '—';
+      setSelection({
+        project,
+        kind: 'range',
+        label: `${fmtRangeTime(span.startMs)}–${fmtRangeTime(span.endMs)}`,
+        detail: `timeline range ${(span.durationMs / 1000).toFixed(2)}s · ${span.segIndexes.length} segment(s), ${span.wordIds.length} word(s), ${span.audioTrackIds.length} audio track(s) · affects ${docs}`,
+        timeWindowMs: { startMs: span.startMs, endMs: span.endMs },
+        affectedDocs: span.affectedDocs,
+      });
     }
-  }, [sel, model, chips, blocks, ctx?.captionFiles, project]);
+  }, [sel, model, chips, placed, fps, blocks, ctx?.captionFiles, project]);
 
   // clear the published selection when the editor unmounts (tab switch / navigation)
   useEffect(() => () => setSelection(null), []);
@@ -1112,22 +1276,51 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
           <div
             data-testid="ft-timeline"
             style={{ border: '1px solid var(--hairline)', borderRadius: 'var(--radius-sm)', overflowX: 'auto', overflowY: 'hidden', background: 'var(--surface-1)', position: 'relative' }}
-            onClick={() => setSel(null)}
+            onClick={() => {
+              if (suppressClearRef.current) {
+                suppressClearRef.current = false;
+                return;
+              }
+              setSel(null);
+            }}
           >
             <div style={{ position: 'relative', width: trackWidth + 52, minWidth: '100%' }}>
               <div style={{ marginLeft: 52, position: 'relative' }}>
-                <Ruler durationSec={durationSec} pxPerSec={pxPerSec} onSeek={seekTo} />
+                <Ruler
+                  durationSec={durationSec}
+                  pxPerSec={pxPerSec}
+                  onSeek={seekTo}
+                  onRangeMove={(a, b) => setSel({ t: 'range', startMs: a * 1000, endMs: b * 1000 })}
+                  onRangeEnd={(a, b) => {
+                    suppressClearRef.current = true;
+                    setSel(b - a < 0.02 ? null : { t: 'range', startMs: a * 1000, endMs: b * 1000 });
+                  }}
+                />
                 <Playhead sec={playheadFrame / fps} pxPerSec={pxPerSec} height={22 + (model.segDoc ? 43 : 0) + (blocks.length > 0 ? 43 : 0) + (hasCaptions ? 41 : 0) + 18 + 3 * 41} />
+                {sel?.t === 'range' && (
+                  <SelectionBand
+                    startSec={sel.startMs / 1000}
+                    endSec={sel.endMs / 1000}
+                    pxPerSec={pxPerSec}
+                    height={22 + (model.segDoc ? 43 : 0) + (blocks.length > 0 ? 43 : 0) + (hasCaptions ? 41 : 0) + 18 + 3 * 41}
+                  />
+                )}
               </div>
               <div style={{ position: 'relative' }}>
                 {model.segDoc && (
-                  <TrackRow label="SEG" height={42} width={trackWidth}>
+                  <TrackRow
+                    label="SEG"
+                    height={42}
+                    width={trackWidth}
+                    trailing={<BrollPicker footageAssets={ctx.footageAssets} onInsert={insertBroll} />}
+                  >
                     <SegmentTrack
                       placed={placed}
                       fps={model.segDoc.fps}
                       pxPerSec={pxPerSec}
                       selectedIndex={sel?.t === 'seg' ? sel.index : null}
                       onSelect={(index) => setSel({ t: 'seg', index })}
+                      onReorder={reorderSegment}
                       onDragStart={beginDrag}
                       onDragMove={onSegDrag}
                       onDragEnd={endDrag}
@@ -1189,6 +1382,46 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
 
         {/* inspector */}
         <div style={{ background: 'var(--surface-1)', border: '1px solid var(--hairline)', borderRadius: 'var(--radius-sm)', padding: 12, minHeight: 160 }}>
+          {sel?.t === 'range' &&
+            (() => {
+              const span = rangeSpan(
+                {
+                  placed,
+                  fps,
+                  words: chips,
+                  audio: model.audioMix.tracks,
+                  segDocName: model.segDocName ?? 'segments.json',
+                  capDocNames: ctx.captionFiles,
+                },
+                sel.startMs,
+                sel.endMs,
+              );
+              const segCount = model.segDoc?.segments.length ?? 0;
+              return (
+                <RangeInspector
+                  span={span}
+                  onClear={() => setSel(null)}
+                  toolbar={
+                    model.segDoc ? (
+                      <div data-testid="ft-range-verbs" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <VerbBtn testid="ft-range-split" onClick={splitAtPlayhead} title="Split the segment under the playhead (S)">
+                          ✂ Split @ playhead
+                        </VerbBtn>
+                        <VerbBtn
+                          testid="ft-range-delete"
+                          onClick={() => removeSegments(span.segIndexes)}
+                          disabled={span.segIndexes.length === 0 || span.segIndexes.length >= segCount}
+                          title="Delete the spanned segments + ripple (Del)"
+                          danger
+                        >
+                          🗑 Delete {span.segIndexes.length} segment{span.segIndexes.length === 1 ? '' : 's'}
+                        </VerbBtn>
+                      </div>
+                    ) : undefined
+                  }
+                />
+              );
+            })()}
           {sel?.t === 'word' && selChip && (
             <WordInspector
               word={selChip}
@@ -1227,6 +1460,44 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
                 if (!seg) return;
                 const cur = seg[field];
                 commit({ ...model, segDoc: { ...model.segDoc!, segments: nudgeSegment(model.segDoc!.segments, sel.index, field, v - cur) } });
+              }}
+              onSplit={splitAtPlayhead}
+              onMoveLeft={() => reorderSegment(sel.index, sel.index - 1)}
+              onMoveRight={() => reorderSegment(sel.index, sel.index + 1)}
+              onDelete={() => removeSegment(sel.index)}
+              canMoveLeft={sel.index > 0}
+              canMoveRight={sel.index < model.segDoc.segments.length - 1}
+              canDelete={model.segDoc.segments.length > 1}
+              footageAssets={ctx.footageAssets}
+              srcMissing={!!selSeg.src && ctx.srcExists[selSeg.src] === false}
+              onSetSrc={(src) => {
+                const segs = model.segDoc!.segments.map((s, i) =>
+                  i === sel.index ? { ...s, ...(src ? { src } : {}) } : s,
+                );
+                if (!src) delete (segs[sel.index] as { src?: string }).src;
+                commit({ ...model, segDoc: { ...model.segDoc!, segments: segs } });
+              }}
+              isFirst={sel.index === 0}
+              crossfadeFrames={model.segDoc.crossfadeFrames}
+              onSetTransition={(t) => {
+                const segs = model.segDoc!.segments.map((s, i) => {
+                  if (i !== sel.index) return s;
+                  const next = { ...s };
+                  if (t) next.transition = t;
+                  else delete next.transition;
+                  return next;
+                });
+                commit({ ...model, segDoc: { ...model.segDoc!, segments: segs } });
+              }}
+              onSetEffects={(effects) => {
+                const segs = model.segDoc!.segments.map((s, i) => {
+                  if (i !== sel.index) return s;
+                  const next = { ...s };
+                  if (effects && effects.length > 0) next.effects = effects;
+                  else delete next.effects;
+                  return next;
+                });
+                commit({ ...model, segDoc: { ...model.segDoc!, segments: segs } });
               }}
             />
           )}
@@ -1307,9 +1578,9 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
           )}
           {!sel && (!ctx.schemaEntry || !model.props) && (
             <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.6 }}>
-              Select a word, segment or audio pill to fine-tune it.
+              Select a word, segment or audio pill to fine-tune it — or drag on the ruler to select a time range.
               <br />
-              Drag chip edges to retime · double-click a word for emphasis · Ctrl+Z undoes.
+              Drag chip edges to retime · double-click a word for emphasis · drag the ruler for a range · Ctrl+Z undoes.
             </div>
           )}
         </div>

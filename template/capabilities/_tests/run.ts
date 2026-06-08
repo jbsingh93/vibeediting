@@ -18,6 +18,8 @@ async function main(): Promise<void> {
     './p0.5-captions.test',
     './p0.6-scaffold.test',
     './p0.7-docs.test',
+    // P0.8 — EDL cut model schema (segments.json: transition + effects, backward-compat) — VE.0
+    './p0.8-edl.test',
     // P0.9 — capability contract (GAP-4)
     './p0.9-contract.test',
     // P1 — global capability engines

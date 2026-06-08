@@ -15,7 +15,7 @@ import { AbsoluteFill, Audio, OffthreadVideo, Sequence, interpolate, staticFile,
 import { BrandContext } from '../../../template/src/components/BrandContext';
 import { KineticCaptions } from '../../../template/src/components/KineticCaptions';
 import type { AudioTrack, CaptionWord, PlacedEdlSegment } from '../lib/finetune';
-import { trackVolumeAt } from '../lib/finetune';
+import { trackVolumeAt, transitionFrames, transitionPresentation, effectsPresentation } from '../lib/finetune';
 
 export interface FineTunePreviewProps extends Record<string, unknown> {
   /** placed EDL segments (empty = single/captions-only mode). */
@@ -39,25 +39,34 @@ export interface FineTunePreviewProps extends Record<string, unknown> {
 const AUDIO_FADE_IN = 2;
 const AUDIO_FADE_OUT = 3;
 
-const SegmentClip: React.FC<{ seg: PlacedEdlSegment; src: string; crossfade: number; isLast: boolean }> = ({
+const SegmentClip: React.FC<{ seg: PlacedEdlSegment; src: string; crossfadeFrames: number; isLast: boolean }> = ({
   seg,
   src,
-  crossfade,
+  crossfadeFrames,
   isLast,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const opacity =
-    seg.index === 0
-      ? 1
-      : interpolate(frame, [0, crossfade], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  // VE.4: the incoming edge animates over `overlap` frames per the segment's typed transition
+  // (absent ⇒ the house dissolve over crossfadeFrames). The first clip has no incoming edge.
+  const overlap = seg.index === 0 ? 0 : transitionFrames(seg, crossfadeFrames);
+  const kind = seg.index === 0 ? 'cut' : seg.transition?.kind ?? 'dissolve';
+  const progress = overlap > 0 ? frame / overlap : 1;
+  const pres = transitionPresentation(kind, seg.transition?.direction, seg.index === 0 ? 1 : progress);
+  // VE.5: the per-clip effects stack composes UNDER the transition wrapper — nested opacity multiplies
+  // and nested transforms compose, so a clip's effects survive its incoming transition.
+  const fx = effectsPresentation(seg.effects);
   return (
-    <AbsoluteFill style={{ opacity }}>
-      <OffthreadVideo
-        src={staticFile(src)}
-        trimBefore={Math.round(seg.srcStart * fps)}
-        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-        volume={(f) => {
+    <AbsoluteFill>
+      {pres.backdrop > 0 && <AbsoluteFill style={{ backgroundColor: '#000', opacity: pres.backdrop }} />}
+      <AbsoluteFill style={{ opacity: pres.clip.opacity ?? 1, transform: pres.clip.transform, clipPath: pres.clip.clipPath }}>
+        <AbsoluteFill style={{ opacity: fx.style.opacity, transform: fx.style.transform, filter: fx.style.filter }}>
+          <OffthreadVideo
+            src={staticFile(src)}
+            trimBefore={Math.round(seg.srcStart * fps)}
+            playbackRate={fx.playbackRate}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            volume={(f) => {
           const fadeIn =
             seg.index === 0
               ? 1
@@ -71,9 +80,11 @@ const SegmentClip: React.FC<{ seg: PlacedEdlSegment; src: string; crossfade: num
                 extrapolateLeft: 'clamp',
                 extrapolateRight: 'clamp',
               });
-          return fadeIn * fadeOut;
-        }}
-      />
+            return fadeIn * fadeOut;
+          }}
+          />
+        </AbsoluteFill>
+      </AbsoluteFill>
     </AbsoluteFill>
   );
 };
@@ -128,7 +139,7 @@ export const FineTunePreview: React.FC<FineTunePreviewProps> = (props) => {
           return (
             <Sequence key={`${seg.id}-${seg.index}`} from={seg.from} durationInFrames={Math.max(1, seg.durationInFrames)} name={`seg:${seg.id}`}>
               {ok && src ? (
-                <SegmentClip seg={seg} src={src} crossfade={crossfadeFrames} isLast={seg.index === placed.length - 1} />
+                <SegmentClip seg={seg} src={src} crossfadeFrames={crossfadeFrames} isLast={seg.index === placed.length - 1} />
               ) : (
                 <MediaOffline label={src ?? 'no source'} />
               )}

@@ -145,6 +145,7 @@ Three capability CLIs generate audio on the fly, straight into the Remotion pipe
 - ElevenLabs v3 TTS — full audio-tags + voice-direction guide (use `--v3` for tags): [references/elevenlabs-tts-v3-guide.md](references/elevenlabs-tts-v3-guide.md)
 - ElevenLabs SFX — full sound-effects prompting + settings guide (`--influence`, 7-dim formula): [references/elevenlabs-sfx-guide.md](references/elevenlabs-sfx-guide.md)
 - ElevenLabs Music — full BGM prompting + settings guide (6-layer formula, BPM/key, composition plans): [references/elevenlabs-music-guide.md](references/elevenlabs-music-guide.md)
+- EDL cut model — `segments.json` (the light-NLE editor's source of truth; transitions + effects): [references/edl-cut-model.md](references/edl-cut-model.md)
 - Best-segments selection (NLE hand-off): [references/best-segments-selection.md](references/best-segments-selection.md)
 - Cluster consensus rules (full 18): [references/cluster-consensus-rules.md](references/cluster-consensus-rules.md)
 - Motion-graphic patterns library: [references/motion-graphic-patterns.md](references/motion-graphic-patterns.md)

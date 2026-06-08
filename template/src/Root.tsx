@@ -6,6 +6,7 @@
 import React from 'react';
 import { Composition } from 'remotion';
 import { DemoWelcome } from './demo-welcome/Main';
+import { EdlTimeline, calculateEdlMetadata } from './EdlTimeline';
 
 export const Root: React.FC = () => {
   return (
@@ -17,6 +18,18 @@ export const Root: React.FC = () => {
         fps={30}
         width={1920}
         height={1080}
+      />
+      {/* The light-NLE cut renderer (VE.4). Render with `--props '{"project":"<id>"}'`; fps,
+          duration and size are derived from the project's segments.json by calculateMetadata. */}
+      <Composition
+        id="EdlTimeline"
+        component={EdlTimeline}
+        calculateMetadata={calculateEdlMetadata}
+        durationInFrames={150}
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={{ project: 'demo' }}
       />
     </>
   );

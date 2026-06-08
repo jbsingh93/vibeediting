@@ -112,6 +112,40 @@ export default async function globalSetup(): Promise<void> {
     'utf8',
   );
   fs.writeFileSync(path.join(demoPub, 'bgm-bed.wav'), silentWav());
+  // Dedicated EDL projects (no captions) for the VE.1–VE.4 editor specs, so the caption-only chip
+  // specs on e2e-demo stay in captions-only mode. Each spec that SAVES gets its own project so the
+  // file-order test run can't contaminate the next. crossfade 0 → output time == source time.
+  const seedEdlProject = (id: string, opts: { broll?: boolean } = {}): void => {
+    createManifest(id, {
+      inputs: { mode: 'wizard', format: '9:16-ad', lang: 'en', plan_gate_stage: 'motion' },
+      notes: `# Plan — ${id}\n\nA real-footage cut for the light NLE.\n`,
+      force: true,
+    });
+    startStage(id, 'ingest');
+    setStage(id, 'ingest', { status: 'complete', finished_at: new Date().toISOString(), outputs: [`public/${id}/segments.json`] });
+    const pub = path.join(PUBLIC, id);
+    fs.mkdirSync(pub, { recursive: true });
+    fs.writeFileSync(
+      path.join(pub, 'segments.json'),
+      JSON.stringify({
+        fps: 30,
+        crossfadeFrames: 0,
+        src: `${id}/clip.mp4`,
+        segments: [
+          { id: 's1', srcStart: 0, srcEnd: 1, cap: '' },
+          { id: 's2', srcStart: 1, srcEnd: 2, cap: '' },
+          { id: 's3', srcStart: 2, srcEnd: 3, cap: '' },
+        ],
+      }),
+      'utf8',
+    );
+    // footage asset for the VE.3 b-roll picker (undecodable bytes → default length + placeholder).
+    if (opts.broll) fs.writeFileSync(path.join(pub, 'broll.mp4'), Buffer.alloc(2048, 0x21));
+  };
+  seedEdlProject('e2e-edl'); // VE.2 structural verbs
+  seedEdlProject('e2e-edl-broll', { broll: true }); // VE.3 b-roll insert
+  seedEdlProject('e2e-edl-tr'); // VE.4 transitions
+  seedEdlProject('e2e-edl-fx'); // VE.5 per-clip effects
   // a real tiny render so RendersPanel shows a row (distill + renders specs).
   const demoDeliver = path.join(DELIVER, 'e2e-demo');
   fs.mkdirSync(demoDeliver, { recursive: true });
