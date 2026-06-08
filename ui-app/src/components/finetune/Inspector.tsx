@@ -47,12 +47,15 @@ export function RangeInspector({
   span,
   onClear,
   toolbar,
+  audioPanel,
   agentField,
 }: {
   span: RangeSpan;
   onClear: () => void;
   /** VE.2+ manual verb buttons (split/delete/reorder/insert/transition/effect). */
   toolbar?: React.ReactNode;
+  /** VE.7 range-scoped audio controls (gain/duck/mute per spanned track + footage + insert). */
+  audioPanel?: React.ReactNode;
   /** VE.6 "Ask Editor Agent" field. */
   agentField?: React.ReactNode;
 }) {
@@ -90,6 +93,7 @@ export function RangeInspector({
         </div>
       )}
       {toolbar}
+      {audioPanel}
       {agentField}
       <div style={{ color: 'var(--muted)', fontSize: 11 }}>
         drag the ruler to reselect · ← → move ±100 ms · Shift ← → resize end · Esc clears
@@ -111,6 +115,221 @@ export function RangeInspector({
         clear range
       </button>
     </InspectorShell>
+  );
+}
+
+// ── Ask Editor Agent (VE.6 — D29) ───────────────────────────────────────────────
+// The differentiator: a range-scoped agent turn with NO new transport (hard rule 5). The button
+// drops the visible `[Editing range …]` scope prefix into the shared chat composer (VE.6.1, via
+// COMPOSER_PREFILL_EVENT) and focuses it — the user types what to change and sends a normal turn;
+// the agent edits the same docs and the existing disk-diff accept/reject card surfaces the result.
+// Rendered ONLY where the composer is mounted (the project workspace) — FineTune passes it then.
+export function AskAgentField({ onAsk }: { onAsk: () => void }) {
+  return (
+    <div data-testid="ft-range-ask" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>
+        ask the agent
+      </div>
+      <button
+        data-testid="ft-range-ask-agent"
+        onClick={onAsk}
+        title="Prefill the chat composer with this range — type what to change, then send"
+        style={{
+          alignSelf: 'flex-start',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          background: 'var(--surface-2)',
+          border: '1px solid var(--accent)',
+          borderRadius: 'var(--radius-sm)',
+          color: 'var(--secondary)',
+          fontSize: 12,
+          fontWeight: 700,
+          padding: '5px 12px',
+          cursor: 'pointer',
+        }}
+      >
+        🤖 Ask Editor Agent
+      </button>
+      <div style={{ color: 'var(--muted)', fontSize: 11 }}>
+        drops <span className="mono">[Editing range …]</span> into the chat — the agent edits only this window
+      </div>
+    </div>
+  );
+}
+
+// ── range-scoped audio (VE.7.1 / D34) ────────────────────────────────────────────
+// Inline controls shown when a dragged range overlaps audio. Each spanned music/SFX/VO clip gets a
+// gain slider + mute + duck — every control SPLITS the clip at the range edges and edits only the
+// inner clip (D34's clip model). A footage row gains/mutes the spanned video segments' own audio.
+// "insert here" drops a new music/SFX track at the range start (VE.7.2). The −14 LUFS master is a
+// render post-pass over the whole mix, so nothing here can bypass it.
+
+/** One clip shown in the range-audio panel — the clip currently covering the range midpoint. */
+export interface RangeClipView {
+  id: string;
+  role: AudioTrack['role'];
+  src: string;
+  gainDb: number;
+  ducked: boolean;
+}
+
+const microBtn = (danger?: boolean): React.CSSProperties => ({
+  background: 'transparent',
+  border: '1px solid var(--hairline)',
+  borderRadius: 'var(--radius-sm)',
+  color: danger ? 'var(--danger)' : 'var(--muted)',
+  fontSize: 10,
+  padding: '2px 7px',
+  cursor: 'pointer',
+});
+
+function InsertPick({
+  role,
+  label,
+  assets,
+  onInsert,
+}: {
+  role: AudioTrack['role'];
+  label: string;
+  assets: AssetInfo[];
+  onInsert: (role: AudioTrack['role'], src: string) => void;
+}) {
+  return (
+    <select
+      data-testid={`ft-range-insert-${role}`}
+      defaultValue=""
+      onChange={(e) => {
+        if (e.target.value) onInsert(role, e.target.value);
+        e.currentTarget.value = '';
+      }}
+      style={{ ...inputStyle(110), fontSize: 11 }}
+    >
+      <option value="" disabled>
+        {label}
+      </option>
+      {assets.map((a) => {
+        const src = a.relPath.replace(/^public\//, '');
+        return (
+          <option key={a.relPath} value={src}>
+            {a.name}
+          </option>
+        );
+      })}
+    </select>
+  );
+}
+
+export function RangeAudioControls({
+  clips,
+  onClipGain,
+  onClipMute,
+  onClipDuck,
+  footageCount,
+  footageGainDb,
+  footageMuted,
+  onFootageGain,
+  onFootageMute,
+  audioAssets,
+  onInsert,
+}: {
+  clips: RangeClipView[];
+  onClipGain: (id: string, gainDb: number) => void;
+  onClipMute: (id: string) => void;
+  onClipDuck: (id: string, depth: number | null) => void;
+  footageCount: number;
+  footageGainDb: number;
+  footageMuted: boolean;
+  onFootageGain: (gainDb: number) => void;
+  onFootageMute: (mute: boolean) => void;
+  audioAssets: AssetInfo[];
+  onInsert: (role: AudioTrack['role'], src: string) => void;
+}) {
+  const nameOf = (src: string) => src.split('/').pop() ?? src;
+  return (
+    <div
+      data-testid="ft-range-audio"
+      style={{ display: 'flex', flexDirection: 'column', gap: 6, borderTop: '1px solid var(--hairline)', paddingTop: 8 }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>
+        range audio
+      </div>
+
+      {footageCount > 0 && (
+        <div data-testid="ft-range-footage" style={{ ...row, flexWrap: 'wrap' }}>
+          <span style={{ flex: '0 0 56px', color: 'var(--secondary)', fontWeight: 600 }}>footage</span>
+          <input
+            data-testid="ft-range-footage-gain"
+            type="range"
+            min={-36}
+            max={12}
+            step={1}
+            value={footageGainDb}
+            disabled={footageMuted}
+            onChange={(e) => onFootageGain(parseFloat(e.target.value))}
+            style={{ flex: 1, minWidth: 70 }}
+          />
+          <span className="mono" style={{ fontSize: 11, width: 50, textAlign: 'right' }}>{fmtGain(footageGainDb)}</span>
+          <button
+            data-testid="ft-range-footage-mute"
+            onClick={() => onFootageMute(!footageMuted)}
+            style={microBtn(footageMuted)}
+          >
+            {footageMuted ? 'muted' : 'mute'}
+          </button>
+        </div>
+      )}
+
+      {clips.map((c) => (
+        // keyed by the lane (role:src), NOT the clip id — a range edit SPLITS the clip so its id
+        // changes, but the lane is stable, so React reconciles the same slider element and a
+        // continuous drag keeps working (and keyboard focus survives) across the split.
+        <div key={`${c.role}:${c.src}`} data-testid="ft-range-audio-clip" data-track={c.id} style={{ ...row, flexWrap: 'wrap' }} title={c.src}>
+          <span style={{ flex: '0 0 56px', color: 'var(--secondary)', fontWeight: 600 }}>
+            {c.role.toUpperCase()}
+          </span>
+          <input
+            data-testid="ft-range-audio-gain"
+            type="range"
+            min={-36}
+            max={12}
+            step={1}
+            value={c.gainDb}
+            onChange={(e) => onClipGain(c.id, parseFloat(e.target.value))}
+            style={{ flex: 1, minWidth: 70 }}
+          />
+          <span className="mono" style={{ fontSize: 11, width: 50, textAlign: 'right' }}>{fmtGain(c.gainDb)}</span>
+          <button data-testid="ft-range-audio-mute" onClick={() => onClipMute(c.id)} style={microBtn(true)} title={`silence ${nameOf(c.src)} in this window`}>
+            mute
+          </button>
+          <select
+            data-testid="ft-range-audio-duck"
+            value={c.ducked ? 'on' : 'off'}
+            onChange={(e) => onClipDuck(c.id, e.target.value === 'off' ? null : 0.12)}
+            style={{ ...inputStyle(74), fontSize: 11 }}
+          >
+            <option value="off">no duck</option>
+            <option value="on">duck</option>
+          </select>
+        </div>
+      ))}
+
+      {clips.length === 0 && footageCount === 0 && (
+        <div style={{ color: 'var(--muted)', fontSize: 11 }}>no audio under this range</div>
+      )}
+
+      {audioAssets.length > 0 && (
+        <div data-testid="ft-range-insert" style={{ ...row, flexWrap: 'wrap' }}>
+          <span style={{ flex: '0 0 56px', color: 'var(--muted)' }}>insert</span>
+          <InsertPick role="bgm" label="+ music here" assets={audioAssets} onInsert={onInsert} />
+          <InsertPick role="sfx" label="+ sfx here" assets={audioAssets} onInsert={onInsert} />
+        </div>
+      )}
+
+      <div style={{ color: 'var(--muted)', fontSize: 10 }}>
+        gain/mute/duck split the clip at the range edges · footage applies to whole spanned clips (split first for tighter scope)
+      </div>
+    </div>
   );
 }
 
@@ -371,6 +590,8 @@ export function SegmentInspector({
   crossfadeFrames,
   onSetTransition,
   onSetEffects,
+  onSetAudioGain,
+  onSetAudioMute,
 }: {
   segment: EdlSegment;
   onNudge: (field: 'srcStart' | 'srcEnd', deltaSec: number) => void;
@@ -394,6 +615,10 @@ export function SegmentInspector({
   onSetTransition?: (t: Transition | undefined) => void;
   /** VE.5: edit the clip's ordered per-clip effects stack. */
   onSetEffects?: (effects: Effect[] | undefined) => void;
+  /** VE.7 / D34: this clip's own footage-audio level (dB). `null` clears (back to 0 dB). */
+  onSetAudioGain?: (gainDb: number | null) => void;
+  /** VE.7 / D34: mute this clip's footage audio (video plays on). */
+  onSetAudioMute?: (mute: boolean) => void;
 }) {
   const nudges = (field: 'srcStart' | 'srcEnd') => (
     <span style={{ display: 'inline-flex', gap: 4 }}>
@@ -568,6 +793,41 @@ export function SegmentInspector({
         </div>
       )}
       {onSetEffects && <EffectsPanel effects={segment.effects} onSetEffects={onSetEffects} />}
+      {onSetAudioGain && onSetAudioMute && (
+        <div
+          data-testid="ft-seg-audio"
+          style={{ borderTop: '1px solid var(--hairline)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: 'var(--muted)' }}>
+            footage audio
+          </div>
+          <label style={row}>
+            <span style={lab}>gain</span>
+            <input
+              data-testid="ft-seg-audio-gain"
+              type="range"
+              min={-36}
+              max={12}
+              step={1}
+              value={segment.audioGainDb ?? 0}
+              disabled={!!segment.audioMute}
+              onChange={(e) => onSetAudioGain(parseFloat(e.target.value) === 0 ? null : parseFloat(e.target.value))}
+              style={{ flex: 1 }}
+            />
+            <span className="mono" style={{ fontSize: 11, width: 52, textAlign: 'right' }}>{fmtGain(segment.audioGainDb ?? 0)}</span>
+          </label>
+          <label style={row}>
+            <span style={lab}>mute</span>
+            <input
+              data-testid="ft-seg-audio-mute"
+              type="checkbox"
+              checked={!!segment.audioMute}
+              onChange={(e) => onSetAudioMute(e.target.checked)}
+            />
+            <span style={{ color: 'var(--muted)', fontSize: 11 }}>silence this clip&apos;s own audio (video keeps playing)</span>
+          </label>
+        </div>
+      )}
     </InspectorShell>
   );
 }

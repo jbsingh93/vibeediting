@@ -56,8 +56,21 @@ loads and renders byte-identically.
   scope (D33).
 - **Single video lane (D31).** B-roll is a cutaway: insert a segment with its own `src`. True overlay
   / picture-in-picture is deferred — do not assume a second video lane exists.
-- **One audio master, locked.** Audio stays in `audio-mix.json` (`masterLufs: -14`); never put audio
-  in `segments.json`.
+- **One audio master, locked.** The added music/SFX/VO mix lives in `audio-mix.json`
+  (`masterLufs: -14`, a render post-pass — never editable, and no per-clip level can bypass it).
+- **Range-scoped audio is clip-based (D34).** To change a track's level only inside a window, SPLIT it
+  into clips: an `audio-mix.json` track may carry `srcInSec` (where in the file the clip starts) +
+  `durationSec` (its output length); absent ⇒ plays from the head to the end (legacy, unchanged). Dip =
+  a clip with a lower `gainDb` over the window; mute = a gap (omit the clip there — the next clip keeps
+  its `srcInSec`, so audio resumes in sync); duck = `duck:{depth}` on that clip. The footage clip's OWN
+  audio is on the **segment**: `audioGainDb` (dB over the auto fade) and `audioMute` (silence it, video
+  plays on) in `segments.json`. All four fields are optional ⇒ absent renders byte-identically.
+- **Range-scoped "Ask Editor Agent" turns (D29).** A turn prefixed with
+  `[Editing range m:ss–m:ss · affects <doc>…]` is fenced: edit ONLY the named docs, change ONLY the
+  clips/words whose output window overlaps the range, and keep everything before/after the window
+  byte-for-byte (a straddling clip may be split, but its out-of-window half is untouched). The user
+  reviews your write as a disk-diff accept/reject card — a diff that escapes the window or the named
+  docs gets rejected. Full guidance: the cockpit contract in `.claude/agents/vibe-studio.md`.
 
 See also: [pipeline-edit-real-footage.md](pipeline-edit-real-footage.md) (the full ingest→cut→render
 pipeline) and the cockpit contract in `.claude/agents/vibe-studio.md`.

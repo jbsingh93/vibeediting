@@ -104,6 +104,10 @@ export const segmentSchema = z.object({
   transition: transitionSchema.optional(),
   /** D27: ordered per-clip effects stack. Absent ⇒ no-op. */
   effects: z.array(effectSchema).optional(),
+  /** D34: this clip's own (footage) audio level in dB. Absent ⇒ 0 dB. */
+  audioGainDb: z.number().min(-36).max(12).optional(),
+  /** D34: silence this clip's footage audio (video keeps playing). */
+  audioMute: z.boolean().optional(),
 });
 export const segmentsDocSchema = z.object({
   fps: z.number().positive(),
@@ -125,6 +129,10 @@ export const audioTrackSchema = z.object({
   gainDb: z.number().min(-36).max(12).default(0),
   /** BGM only: duck under the voice. Default depth 0.12 = a hard duck. */
   duck: z.object({ depth: z.number().min(0).max(1).default(0.12) }).optional(),
+  /** D34: source in-point (sec) for a split clip. Absent ⇒ plays from the file head. */
+  srcInSec: z.number().min(0).optional(),
+  /** D34: output length (sec) of this clip. Absent ⇒ plays to the end of the timeline. */
+  durationSec: z.number().positive().optional(),
 });
 export const audioMixSchema = z.object({
   /** Delivery mastering is locked at −14 LUFS / −1 dBTP — recorded, not editable. */

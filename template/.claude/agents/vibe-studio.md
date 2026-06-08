@@ -68,7 +68,11 @@ exactly four truths, and a "finished" video that skips them is NOT finished:
    - `*captions*.json` → a word-level array `[{ "text", "startMs", "endMs" }]` (Remotion
      `Caption[]` — also for kinetic/motion text; convert frames → ms with `frame/fps*1000`).
    - `audio-mix.json` → `{ "masterLufs": -14, "tracks": [{ "id", "role": "vo"|"bgm"|"sfx",
-     "src", "offsetSec", "gainDb", "duck"? }] }` (gain in dB, NOT 0–1 volume).
+     "src", "offsetSec", "gainDb", "duck"?, "srcInSec"?, "durationSec"? }] }` (gain in dB, NOT 0–1
+     volume). A track is a CLIP: `srcInSec` = where in the file it starts, `durationSec` = its output
+     length (both absent ⇒ plays from the head to the end). To dip/mute a track only inside a window,
+     SPLIT it into clips (D34): a quieter `gainDb` clip = a dip; a GAP = silence (the next clip keeps
+     its `srcInSec`, so audio stays in sync); `masterLufs` is a locked render post-pass — never edit it.
    - `segments.json` → `{ "fps", "crossfadeFrames", "segments": [{ "id", "srcStart", "srcEnd",
      "src"?, "cap"?, "transition"?, "effects"? }] }` (real-footage cuts; the light-NLE cut model).
      - `transition?` (incoming edge): `{ "kind": "cut"|"dissolve"|"fade"|"slide"|"wipe",
@@ -79,7 +83,28 @@ exactly four truths, and a "finished" video that skips them is NOT finished:
        "colorCorrect", "brightness"?, "contrast"?, "saturation"? }`. (`{ "type": "lut", "src" }` is
        schema-valid but its renderer ships post-launch — avoid until then.) OMIT `effects` for a
        plain clip. These render IDENTICALLY in the cockpit preview and the headless render.
+     - `audioGainDb?` / `audioMute?` (D34): the clip's OWN footage-audio level — gain in dB over the
+       auto fade, or `audioMute: true` to silence it while the video plays on. OMIT both for untouched
+       footage audio. (The added music/SFX/VO mix lives in `audio-mix.json`, not here.)
    - Every OTHER knob (colors, font sizes, spring constants, scene frame ranges…) → `props.json`.
+5. **Range-scoped edits (the "Ask Editor Agent" turn, D29).** When a turn arrives prefixed with
+   `[Editing range m:ss–m:ss · affects <doc>, <doc>…]`, the user dragged a time window in the editor
+   and wants a SCOPED change. Treat the prefix as a hard fence:
+   - **Touch ONLY the named docs.** If it says `affects segments.json`, do not edit `captions.json`,
+     `audio-mix.json`, `props.json` or any other file — even if a broader change seems nicer.
+   - **Change ONLY what overlaps the window; preserve everything outside it.** Clips/words that end
+     before the start time or begin after the end time are LOCKED — keep their `id`, `srcStart`/
+     `srcEnd`, `transition`, `effects` byte-for-byte. A clip that straddles the boundary may be split,
+     but its out-of-window half stays unchanged. The output timeline ripples and captions re-project
+     for free (`placeEdl` + `remapEdlCaptions`) — never hand-shift timings outside the window to
+     "compensate."
+   - **Make the smallest edit that satisfies the ask.** The user sees your write as a disk-diff
+     accept/reject card; a diff that reaches outside the named window/docs reads as a mistake and
+     gets rejected.
+   - *Few-shot.* Prefix `[Editing range 0:12–0:18 · affects segments.json]`, ask "tighten this":
+     reorder/trim/delete only the clips whose output window overlaps 0:12–0:18 in `segments.json`;
+     leave the clips before 0:12 and after 0:18 exactly as they were, and do not open
+     `captions.json` or `audio-mix.json`.
 
 If a turn arrives prefixed with a `[Cockpit contract — NOT yet satisfied …]` note, fix those items
 during that turn — the note disappears once you comply.

@@ -58,6 +58,7 @@ export function AudioTracksUI({
                 key={t.id}
                 track={t}
                 pxPerSec={pxPerSec}
+                laneWidth={width}
                 missing={srcExists[t.src] !== true}
                 isSelected={selectedId === t.id}
                 onSelect={onSelect}
@@ -75,6 +76,7 @@ export function AudioTracksUI({
 function TrackPill({
   track,
   pxPerSec,
+  laneWidth,
   missing,
   isSelected,
   onSelect,
@@ -84,6 +86,7 @@ function TrackPill({
 }: {
   track: AudioTrack;
   pxPerSec: number;
+  laneWidth: number;
   missing: boolean;
   isSelected: boolean;
   onSelect: (id: string) => void;
@@ -100,11 +103,16 @@ function TrackPill({
     onEnd: onDragEnd,
   });
   const name = track.src.split('/').pop() ?? track.src;
+  const left = track.offsetSec * pxPerSec;
+  // A split clip (durationSec set) is drawn at its true width; a legacy "to-end" track fills the lane.
+  const clipWidth = track.durationSec != null ? Math.max(24, track.durationSec * pxPerSec) : Math.max(24, laneWidth - left);
   return (
     <div
       data-testid="ft-audio-pill"
       data-audio={track.id}
-      title={`${track.src} · offset ${track.offsetSec.toFixed(2)}s · ${fmtGain(track.gainDb)}${
+      title={`${track.src} · offset ${track.offsetSec.toFixed(2)}s${
+        track.durationSec != null ? ` · ${track.durationSec.toFixed(2)}s` : ''
+      }${track.srcInSec ? ` · src@${track.srcInSec.toFixed(2)}s` : ''} · ${fmtGain(track.gainDb)}${
         track.duck ? ` · duck ${track.duck.depth}` : ''
       }${missing ? ' · ⚠ file not on disk (not previewed)' : ''}`}
       onPointerDown={drag.onPointerDown}
@@ -114,7 +122,11 @@ function TrackPill({
       }}
       style={{
         position: 'absolute',
-        left: track.offsetSec * pxPerSec,
+        left,
+        width: clipWidth,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
         top: 7,
         height: 26,
         padding: '0 12px',

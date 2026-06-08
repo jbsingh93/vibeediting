@@ -67,7 +67,11 @@ export function AgentPanel({
   function submit() {
     const t = draft.trim();
     if (!t) return;
-    agent.send(selection ? `${formatSelectionForAgent(selection)}\n${t}` : t);
+    // VE.6.1 — a 'range' selection rides the VISIBLE composer text (the "Ask Editor Agent" prefill
+    // drops `[Editing range …]` into the draft), so it must NOT also be injected here or the agent
+    // receives the scope prefix twice. Word/segment/scene/audio keep the by-value prepend.
+    const prefix = selection && selection.kind !== 'range' ? `${formatSelectionForAgent(selection)}\n` : '';
+    agent.send(`${prefix}${t}`);
     setDraft('');
   }
 

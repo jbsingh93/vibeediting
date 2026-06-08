@@ -32,6 +32,7 @@ import {
   transitionPresentation,
   effectsPresentation,
   trackVolumeAt,
+  footageGain,
   voWindows,
   parseSegments,
   type AudioTrack,
@@ -138,7 +139,8 @@ const SegmentClip: React.FC<{ seg: PlacedEdlSegment; src: string; crossfadeFrame
                   extrapolateLeft: 'clamp',
                   extrapolateRight: 'clamp',
                 });
-            return fadeIn * fadeOut;
+            // D34: the clip's own footage-audio level (gain/mute) rides over the fade envelope.
+            return fadeIn * fadeOut * footageGain(seg);
           }}
           />
         </AbsoluteFill>
@@ -173,8 +175,17 @@ export const EdlTimeline: React.FC<EdlTimelineProps> = (props) => {
         })}
 
         {audioTracks.map((t) => (
-          <Sequence key={t.id} from={Math.round(t.offsetSec * fps)} name={`audio:${t.id}`}>
-            <Audio src={staticFile(t.src)} volume={(f) => trackVolumeAt(t, voWins, (f + t.offsetSec * fps) / fps)} />
+          <Sequence
+            key={t.id}
+            from={Math.round(t.offsetSec * fps)}
+            durationInFrames={t.durationSec != null ? Math.max(1, Math.round(t.durationSec * fps)) : undefined}
+            name={`audio:${t.id}`}
+          >
+            <Audio
+              src={staticFile(t.src)}
+              trimBefore={Math.round((t.srcInSec ?? 0) * fps)}
+              volume={(f) => trackVolumeAt(t, voWins, (f + t.offsetSec * fps) / fps)}
+            />
           </Sequence>
         ))}
 

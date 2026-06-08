@@ -15,7 +15,7 @@ import { AbsoluteFill, Audio, OffthreadVideo, Sequence, interpolate, staticFile,
 import { BrandContext } from '../../../template/src/components/BrandContext';
 import { KineticCaptions } from '../../../template/src/components/KineticCaptions';
 import type { AudioTrack, CaptionWord, PlacedEdlSegment } from '../lib/finetune';
-import { trackVolumeAt, transitionFrames, transitionPresentation, effectsPresentation } from '../lib/finetune';
+import { trackVolumeAt, transitionFrames, transitionPresentation, effectsPresentation, footageGain } from '../lib/finetune';
 
 export interface FineTunePreviewProps extends Record<string, unknown> {
   /** placed EDL segments (empty = single/captions-only mode). */
@@ -80,7 +80,8 @@ const SegmentClip: React.FC<{ seg: PlacedEdlSegment; src: string; crossfadeFrame
                 extrapolateLeft: 'clamp',
                 extrapolateRight: 'clamp',
               });
-            return fadeIn * fadeOut;
+            // D34: the clip's own footage-audio level (gain/mute) rides over the fade envelope.
+            return fadeIn * fadeOut * footageGain(seg);
           }}
           />
         </AbsoluteFill>
@@ -150,8 +151,17 @@ export const FineTunePreview: React.FC<FineTunePreviewProps> = (props) => {
 
         {audioTracks.map((t) =>
           audioSrcExists[t.src] === true ? (
-            <Sequence key={t.id} from={Math.round(t.offsetSec * fps)} name={`audio:${t.id}`}>
-              <Audio src={staticFile(t.src)} volume={(f) => trackVolumeAt(t, voWins, (f + t.offsetSec * fps) / fps)} />
+            <Sequence
+              key={t.id}
+              from={Math.round(t.offsetSec * fps)}
+              durationInFrames={t.durationSec != null ? Math.max(1, Math.round(t.durationSec * fps)) : undefined}
+              name={`audio:${t.id}`}
+            >
+              <Audio
+                src={staticFile(t.src)}
+                trimBefore={Math.round((t.srcInSec ?? 0) * fps)}
+                volume={(f) => trackVolumeAt(t, voWins, (f + t.offsetSec * fps) / fps)}
+              />
             </Sequence>
           ) : null,
         )}

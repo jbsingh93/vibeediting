@@ -19,6 +19,7 @@ import * as path from 'node:path';
 import {
   MAIN_PROJECT_DIR,
   MAIN_PROJECTS_ROOT,
+  CODEX_PROJECT_DIR,
   CODEX_PROJECTS_ROOT,
 } from '../../playwright.config.js';
 
@@ -115,7 +116,7 @@ export default async function globalSetup(): Promise<void> {
   // Dedicated EDL projects (no captions) for the VE.1–VE.4 editor specs, so the caption-only chip
   // specs on e2e-demo stay in captions-only mode. Each spec that SAVES gets its own project so the
   // file-order test run can't contaminate the next. crossfade 0 → output time == source time.
-  const seedEdlProject = (id: string, opts: { broll?: boolean } = {}): void => {
+  const seedEdlProject = (id: string, opts: { broll?: boolean; audio?: boolean } = {}): void => {
     createManifest(id, {
       inputs: { mode: 'wizard', format: '9:16-ad', lang: 'en', plan_gate_stage: 'motion' },
       notes: `# Plan — ${id}\n\nA real-footage cut for the light NLE.\n`,
@@ -141,11 +142,27 @@ export default async function globalSetup(): Promise<void> {
     );
     // footage asset for the VE.3 b-roll picker (undecodable bytes → default length + placeholder).
     if (opts.broll) fs.writeFileSync(path.join(pub, 'broll.mp4'), Buffer.alloc(2048, 0x21));
+    // VE.7 range audio: a music bed (one to-end BGM track) + audio assets for the insert pickers.
+    if (opts.audio) {
+      fs.writeFileSync(path.join(pub, 'bgm-bed.mp3'), Buffer.alloc(2048, 0x33));
+      fs.writeFileSync(path.join(pub, 'sfx-whoosh.mp3'), Buffer.alloc(2048, 0x44));
+      fs.writeFileSync(
+        path.join(pub, 'audio-mix.json'),
+        JSON.stringify({
+          masterLufs: -14,
+          tracks: [{ id: 'bgm-bed', role: 'bgm', src: `${id}/bgm-bed.mp3`, offsetSec: 0, gainDb: -12, duck: { depth: 0.12 } }],
+        }),
+        'utf8',
+      );
+    }
   };
   seedEdlProject('e2e-edl'); // VE.2 structural verbs
   seedEdlProject('e2e-edl-broll', { broll: true }); // VE.3 b-roll insert
   seedEdlProject('e2e-edl-tr'); // VE.4 transitions
   seedEdlProject('e2e-edl-fx'); // VE.5 per-clip effects
+  seedEdlProject('e2e-edl-agent'); // VE.6 range-scoped "Ask Editor Agent" (claude leg + diff card)
+  seedEdlProject('e2e-edl-audio', { audio: true }); // VE.7 range audio — dip music (own project; save mutates disk)
+  seedEdlProject('e2e-edl-audio2', { audio: true }); // VE.7 range audio — footage mute + insert (own project)
   // a real tiny render so RendersPanel shows a row (distill + renders specs).
   const demoDeliver = path.join(DELIVER, 'e2e-demo');
   fs.mkdirSync(demoDeliver, { recursive: true });
@@ -264,6 +281,31 @@ export default async function globalSetup(): Promise<void> {
   fs.writeFileSync(
     path.join(CODEX_PROJECTS_ROOT, 'e2e-codex', 'brief.md'),
     '# Brief — e2e-codex\n\nCodex-mode project — describe the video in the chat.\n',
+    'utf8',
+  );
+  // VE.6 codex parity: an EDL project in the codex tree so the range "Ask Editor Agent" prefill +
+  // turn routing can be exercised against the codex adapter (codex.spec.ts), mirroring the main leg.
+  // (setStage is hardcoded to the MAIN tree; the finetune editor reads public/ docs independent of
+  //  stage status, so the codex EDL project just needs a manifest + segments.json.)
+  createManifest('e2e-codex-edl', {
+    inputs: { mode: 'wizard', format: '9:16-ad', lang: 'en', plan_gate_stage: 'motion' },
+    notes: '# Plan — e2e-codex-edl\n\nA real-footage cut for the codex Ask-Editor-Agent parity leg.\n',
+    force: true,
+  });
+  const codexEdlPub = path.join(CODEX_PROJECT_DIR, 'public', 'e2e-codex-edl');
+  fs.mkdirSync(codexEdlPub, { recursive: true });
+  fs.writeFileSync(
+    path.join(codexEdlPub, 'segments.json'),
+    JSON.stringify({
+      fps: 30,
+      crossfadeFrames: 0,
+      src: 'e2e-codex-edl/clip.mp4',
+      segments: [
+        { id: 's1', srcStart: 0, srcEnd: 1, cap: '' },
+        { id: 's2', srcStart: 1, srcEnd: 2, cap: '' },
+        { id: 's3', srcStart: 2, srcEnd: 3, cap: '' },
+      ],
+    }),
     'utf8',
   );
   process.env.VIBE_PROJECTS_DIR = savedRoot ?? MAIN_PROJECTS_ROOT;

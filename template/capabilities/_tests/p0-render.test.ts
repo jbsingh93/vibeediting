@@ -108,3 +108,50 @@ test('RENDER regression: EdlTimeline renders a frame with per-clip effects (colo
   assert(fs.existsSync(out), `EdlTimeline (effects) still was not produced (exit ${r.status})\n${(r.stdout ?? '') + (r.stderr ?? '')}`);
   assert(fs.statSync(out).size > 2000, 'rendered EdlTimeline (effects) still is suspiciously small — render likely broken');
 });
+
+// VE.7 / D34: the comp mounts + renders with the range-audio data model — a SPLIT audio clip
+// (srcInSec/durationSec → Audio trimBefore + a bounded Sequence) and a MUTED footage segment
+// (footageGain → 0 on the OffthreadVideo volume callback). A still can't carry sound, so this proves
+// calculateMetadata loads audio-mix.json and EdlTimeline renders the D34 shapes without crashing
+// (the volume/mix math parity itself is locked by the ui cross-mirror unit + the live walk).
+test('RENDER regression: EdlTimeline mounts with split audio clips + a muted footage segment (D34)', () => {
+  const proj = path.join(ROOT, 'public', 'render-edl-audio');
+  fs.mkdirSync(proj, { recursive: true });
+  fs.writeFileSync(
+    path.join(proj, 'segments.json'),
+    JSON.stringify({
+      fps: 30,
+      crossfadeFrames: 0,
+      segments: [
+        { id: 's1', srcStart: 0, srcEnd: 1, cap: '', audioGainDb: -6 },
+        { id: 's2', srcStart: 0, srcEnd: 1, cap: '', audioMute: true },
+      ],
+    }),
+  );
+  fs.writeFileSync(
+    path.join(proj, 'captions.json'),
+    JSON.stringify([{ text: 'MIXED', startMs: 0, endMs: 1500, timestampMs: null, confidence: null }]),
+  );
+  fs.writeFileSync(
+    path.join(proj, 'audio-mix.json'),
+    JSON.stringify({
+      masterLufs: -14,
+      tracks: [
+        { id: 'bgm-1', role: 'bgm', src: 'render-edl-audio/missing.mp3', offsetSec: 0, gainDb: -12, durationSec: 0.5 },
+        { id: 'bgm-1-b', role: 'bgm', src: 'render-edl-audio/missing.mp3', offsetSec: 0.5, srcInSec: 0.5, gainDb: -30, durationSec: 0.5 },
+      ],
+    }),
+  );
+  const out = path.join(ROOT, 'out', 'check', 'test-edl-audio.png');
+  try {
+    fs.rmSync(out, { force: true });
+  } catch {
+    /* nothing to remove */
+  }
+  const r = spawnSync(
+    `npx remotion still EdlTimeline "${out}" --frame=15 --scale=0.3 --props="{\\"project\\":\\"render-edl-audio\\"}"`,
+    { encoding: 'utf8', shell: true, cwd: ROOT, timeout: 240000 },
+  );
+  assert(fs.existsSync(out), `EdlTimeline (audio) still was not produced (exit ${r.status})\n${(r.stdout ?? '') + (r.stderr ?? '')}`);
+  assert(fs.statSync(out).size > 2000, 'rendered EdlTimeline (audio) still is suspiciously small — render likely broken');
+});

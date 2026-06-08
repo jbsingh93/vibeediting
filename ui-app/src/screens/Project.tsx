@@ -172,6 +172,7 @@ export function Project({ id, layout }: { id: string; layout: LayoutMode }) {
           <Panel
             title="Editor"
             last
+            fill={tab === 'finetune'}
             tabs={
               // wrap, don't clip — the tab row outgrew one line when Graph landed (UI-P5 QA)
               <div role="tablist" aria-label="Editor view" style={{ display: 'inline-flex', gap: 2, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -228,7 +229,9 @@ export function Project({ id, layout }: { id: string; layout: LayoutMode }) {
                 </div>
               </div>
             )}
-            {tab === 'finetune' && <FineTune project={manifest.project_id} runningStage={runningStage(manifest)} />}
+            {tab === 'finetune' && (
+              <FineTune project={manifest.project_id} runningStage={runningStage(manifest)} canAskAgent />
+            )}
             {tab === 'qa' && (
               <QaPanel
                 projectId={manifest.project_id}
@@ -268,11 +271,15 @@ function Panel({
   title,
   last,
   tabs,
+  fill,
   children,
 }: {
   title: string;
   last?: boolean;
   tabs?: React.ReactNode;
+  /** VE.7.5 — a fill-height tab (the Fine-tune editor): drop the padding + scroll so the child
+   *  claims the whole panel height (height pass-through, doc 14 §5.4). */
+  fill?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -299,7 +306,15 @@ function Panel({
         {title}
         {tabs}
       </div>
-      <div style={{ padding: 16, overflow: 'auto', flex: 1, minHeight: 0 }}>{children}</div>
+      <div
+        style={
+          fill
+            ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+            : { padding: 16, overflow: 'auto', flex: 1, minHeight: 0 }
+        }
+      >
+        {children}
+      </div>
     </section>
   );
 }

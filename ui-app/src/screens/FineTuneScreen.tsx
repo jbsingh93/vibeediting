@@ -48,7 +48,9 @@ export function FineTuneScreen({ project }: { project: string | null }) {
   }, [project]);
 
   return (
-    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1500 }}>
+    // VE.7.5 §5.4 — fill the (overflow:auto) <main> so the editor below can claim viewport height;
+    // the header + project chips stay natural-height and the editor region gets flex:1; minHeight:0.
+    <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1500, height: '100%', minHeight: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Fine-tune</h1>
         <span style={{ color: 'var(--muted)', fontSize: 13 }}>
@@ -88,7 +90,11 @@ export function FineTuneScreen({ project }: { project: string | null }) {
         </div>
       )}
 
-      {project && <FineTune key={project} project={project} runningStage={runningStage} />}
+      {project && (
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <FineTune key={project} project={project} runningStage={runningStage} />
+        </div>
+      )}
       {!project && entries && entries.length > 0 && (
         <div style={{ color: 'var(--muted)', fontSize: 13 }}>Pick a project above to open its editor.</div>
       )}

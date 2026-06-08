@@ -21,8 +21,16 @@ import {
   EMPTY_AUDIO_MIX,
   addTrack,
   alignToVoice,
+  applyRangeGain,
+  applyRangeDuck,
+  applyRangeMute,
+  applyRangeFootageGain,
+  applyRangeFootageMute,
   applyRemappedWordEdit,
   edlTotalFrames,
+  fitPxPerSec,
+  previewLayout,
+  PX_PER_SEC_DEFAULT,
   historyInit,
   historyPush,
   historyRedo,
@@ -43,6 +51,8 @@ import {
   remapEdlCaptions,
   resetToBaseline,
   resizeWord,
+  setSegmentAudioGain,
+  setSegmentAudioMute,
   setTrackDuck,
   setTrackGain,
   snapMs,
@@ -57,7 +67,8 @@ import { subscribe as subscribeWs } from '../lib/ws';
 import type { ManifestWsMessage } from '../lib/types';
 import { capFileName, capKeyForFile, edlDefaults } from '../lib/edl-registry';
 import { diffDocs, type DiffRow } from '../lib/diff';
-import { fmtRangeTime, setSelection } from '../lib/selection';
+import { fmtRangeTime, formatSelectionForAgent, setSelection } from '../lib/selection';
+import { COMPOSER_PREFILL_EVENT } from './WikiModal';
 import { SCHEMA_LOADERS, hasPropsSchema, type SchemaEntry } from '../lib/schema-registry';
 import { findBlockArrays, getAtPath, setAtPath } from '../lib/schema-form';
 import { COMP_LOADERS, type CompId } from '../lib/comp-registry';
@@ -70,8 +81,10 @@ import { SegmentTrack } from './finetune/SegmentTrack';
 import { SceneTrack, sceneBlocks } from './finetune/SceneTrack';
 import { AudioTracksUI } from './finetune/AudioTracksUI';
 import {
+  AskAgentField,
   AudioInspector,
   InspectorShell,
+  RangeAudioControls,
   RangeInspector,
   SchemaForm,
   SegmentInspector,
@@ -117,14 +130,38 @@ type Sel =
 
 const dim = { width: 1080, height: 1920 };
 
-export function FineTune({ project, runningStage }: { project: string; runningStage?: StageName | null }) {
+export function FineTune({
+  project,
+  runningStage,
+  canAskAgent = false,
+}: {
+  project: string;
+  runningStage?: StageName | null;
+  /** VE.6 — render the range "Ask Editor Agent" affordance (true only where the chat composer is
+   *  mounted: the project workspace's Fine-tune tab). The standalone #/finetune route has no agent. */
+  canAskAgent?: boolean;
+}) {
   const [ctx, setCtx] = useState<LoadedCtx | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   // UIP6.10 — a clean slate (no editable docs yet) is a designed state, not a load error.
   const [emptyDocs, setEmptyDocs] = useState(false);
   const [history, setHistory] = useState<History<EditModel> | null>(null);
   const [sel, setSel] = useState<Sel>(null);
-  const [pxPerSec, setPxPerSec] = useState(60);
+  const [pxPerSec, setPxPerSec] = useState(PX_PER_SEC_DEFAULT);
+  // VE.7.5 — fit-to-clip on load: measure the timeline dock + the editor, auto-fit the zoom until
+  // the user touches the slider, and collapse the inspector to a slide-over on a narrow editor pane.
+  const [dockWidth, setDockWidth] = useState(0);
+  const [editorWidth, setEditorWidth] = useState(1200);
+  const [railOpen, setRailOpen] = useState(false);
+  const [dockHeight, setDockHeight] = useState(240); // VE.7.5 §5.3 — resizable timeline dock
+  const zoomTouched = useRef(false);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const dockResize = useRef<{ startY: number; startH: number } | null>(null);
+  const DOCK_MIN = 160;
+  const DOCK_MAX = 640;
+  const clampDock = (h: number) => Math.max(DOCK_MIN, Math.min(DOCK_MAX, Math.round(h)));
   const [playheadFrame, setPlayheadFrame] = useState(0);
   const [previewComp, setPreviewComp] = useState(false);
   // Render preview (Julian 2026-06-07): fine-tune is an editor over the RENDERED VERSIONS —
@@ -388,6 +425,44 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
     const v = model.props?.videoSrc;
     return typeof v === 'string' && ctx?.srcExists[v] ? v : null;
   }, [model, ctx?.srcExists]);
+
+  // ── VE.7.5: fit-to-clip zoom + responsive breakpoint ────────────────────────────
+  // Measure the timeline dock (fit-to-width) and the editor pane (the <1100px slide-over
+  // breakpoint — a ResizeObserver, NOT window.innerWidth, since the editor can be in a narrower
+  // column than the window). jsdom-less unit envs lack ResizeObserver — guard so it's a no-op there.
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return;
+    const dockEl = dockRef.current;
+    const editorEl = editorRef.current;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        if (e.target === dockEl) setDockWidth(e.contentRect.width);
+        else if (e.target === editorEl) setEditorWidth(e.contentRect.width);
+      }
+    });
+    if (dockEl) ro.observe(dockEl);
+    if (editorEl) ro.observe(editorEl);
+    return () => ro.disconnect();
+  }, [ctx]);
+
+  // Auto-fit the zoom to the dock width — only until the user grabs the zoom slider (zoomTouched),
+  // so manual zoom wins permanently and auto-fit never fights the drag. dockWidth===0 keeps the
+  // PX_PER_SEC_DEFAULT fallback (no flash before the first measure).
+  useEffect(() => {
+    if (zoomTouched.current || dockWidth <= 0) return;
+    setPxPerSec(fitPxPerSec(dockWidth, durationSec));
+  }, [dockWidth, durationSec]);
+
+  const narrow = editorWidth < 1100;
+  // On a narrow pane, selecting something opens the slide-over rail; clearing closes it.
+  useEffect(() => {
+    if (!narrow) return;
+    setRailOpen(sel != null);
+  }, [sel, narrow]);
+  // Move focus into the slide-over when it opens (a11y §7) without stealing focus on the desktop rail.
+  useEffect(() => {
+    if (narrow && railOpen) railRef.current?.focus();
+  }, [narrow, railOpen]);
 
   // ── edits ─────────────────────────────────────────────────────────────────────
   const commit = useCallback((next: EditModel) => {
@@ -990,8 +1065,27 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
 
   const previewToggleAvailable = !!ctx.schemaEntry;
 
+  // VE.7.5 §3.2 — size the preview off the LIVE comp/render dims (portrait → height-driven so the
+  // 9:16 frame grows + centers; landscape → the legacy width-driven branch). Same dims that pick
+  // durationInFrames above, so the box never letterboxes wrong.
+  const previewDims =
+    renderSel && renderMeta
+      ? { w: renderMeta.width, h: renderMeta.height }
+      : previewComp && compLoaded
+        ? { w: compLoaded.width, h: compLoaded.height }
+        : { w: dim.width, h: dim.height };
+  const pv = previewLayout(previewDims.w, previewDims.h);
+
   return (
-    <div data-testid="finetune" tabIndex={0} onKeyDown={onKeyDown} style={{ display: 'flex', flexDirection: 'column', gap: 12, outline: 'none' }}>
+    <div
+      ref={editorRef}
+      data-testid="finetune"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      // VE.7.5 §3 — fill the bounded region the mount point hands us (height pass-through), so the
+      // stage + timeline dock claim the viewport instead of top-aligning into a sea of black.
+      style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12, outline: 'none' }}
+    >
       {/* header bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {segDocs.length > 1 && (
@@ -1042,6 +1136,7 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
             overlay live captions
           </label>
         )}
+        <ToolbarSep />
         <GhostBtn testid="ft-undo" onClick={() => setHistory((h) => (h ? historyUndo(h) : h))} disabled={!canUndo} title="Undo (Ctrl+Z)">
           ↶ Undo
         </GhostBtn>
@@ -1079,9 +1174,29 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
           </>
         )}
         <div style={{ flex: 1 }} />
+        {narrow && (
+          <GhostBtn
+            testid="ft-inspector-toggle"
+            onClick={() => setRailOpen((v) => !v)}
+            title="Show / hide the inspector"
+          >
+            {railOpen ? '✕ Inspector' : '⚙ Inspector'}
+          </GhostBtn>
+        )}
+        <ToolbarSep />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--muted)' }}>
           zoom
-          <input data-testid="ft-zoom" type="range" min={20} max={300} value={pxPerSec} onChange={(e) => setPxPerSec(parseInt(e.target.value, 10))} />
+          <input
+            data-testid="ft-zoom"
+            type="range"
+            min={20}
+            max={300}
+            value={pxPerSec}
+            onChange={(e) => {
+              zoomTouched.current = true; // manual zoom wins permanently — stop auto-fit recomputing
+              setPxPerSec(parseInt(e.target.value, 10));
+            }}
+          />
         </label>
         {dirty && <span aria-hidden title="unsaved changes" style={{ width: 8, height: 8, borderRadius: 999, background: 'var(--accent)' }} />}
         <button
@@ -1182,9 +1297,15 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 250px', gap: 14, alignItems: 'start' }}>
-        {/* preview + timeline */}
-        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* VE.7.5 §3 — the app-shell stage row: a centered preview + the inspector rail (position:
+          relative anchors the narrow-pane slide-over); the full-width timeline dock sits below it. */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 14, position: 'relative' }}>
+        {/* preview area — centers the (often narrow 9:16) preview in a filled stage */}
+        <div
+          role="region"
+          aria-label="Preview"
+          style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+        >
           <div
             data-testid="ft-preview"
             style={{
@@ -1192,16 +1313,10 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
               border: '1px solid var(--hairline)',
               borderRadius: 'var(--radius-sm)',
               overflow: 'hidden',
-              // explicit width — the Player sizes to 100% of it (a shrink-to-fit parent collapses to 0)
-              width:
-                renderSel && renderMeta
-                  ? renderMeta.width > renderMeta.height
-                    ? 'min(640px, 100%)'
-                    : 280
-                  : previewComp && compLoaded && compLoaded.width > compLoaded.height
-                    ? 'min(640px, 100%)'
-                    : 280,
               flex: 'none',
+              // VE.7.5 §3.2 — portrait → height-driven (fills + centers in the stage); landscape →
+              // the legacy width-driven branch. The Player below spreads pv.player to match.
+              ...pv.box,
             }}
           >
             {renderSel ? (
@@ -1221,7 +1336,7 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
                   compositionWidth={renderMeta.width}
                   compositionHeight={renderMeta.height}
                   controls
-                  style={{ width: '100%' }}
+                  style={pv.player}
                   acknowledgeRemotionLicense
                 />
               ) : (
@@ -1238,7 +1353,7 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
                   compositionWidth={compLoaded.width}
                   compositionHeight={compLoaded.height}
                   controls
-                  style={{ width: '100%' }}
+                  style={pv.player}
                   acknowledgeRemotionLicense
                 />
               ) : (
@@ -1266,122 +1381,57 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
                 compositionWidth={dim.width}
                 compositionHeight={dim.height}
                 controls
-                style={{ width: '100%' }}
+                style={pv.player}
                 acknowledgeRemotionLicense
               />
             )}
           </div>
 
-          {/* timeline */}
-          <div
-            data-testid="ft-timeline"
-            style={{ border: '1px solid var(--hairline)', borderRadius: 'var(--radius-sm)', overflowX: 'auto', overflowY: 'hidden', background: 'var(--surface-1)', position: 'relative' }}
-            onClick={() => {
-              if (suppressClearRef.current) {
-                suppressClearRef.current = false;
-                return;
-              }
-              setSel(null);
-            }}
-          >
-            <div style={{ position: 'relative', width: trackWidth + 52, minWidth: '100%' }}>
-              <div style={{ marginLeft: 52, position: 'relative' }}>
-                <Ruler
-                  durationSec={durationSec}
-                  pxPerSec={pxPerSec}
-                  onSeek={seekTo}
-                  onRangeMove={(a, b) => setSel({ t: 'range', startMs: a * 1000, endMs: b * 1000 })}
-                  onRangeEnd={(a, b) => {
-                    suppressClearRef.current = true;
-                    setSel(b - a < 0.02 ? null : { t: 'range', startMs: a * 1000, endMs: b * 1000 });
-                  }}
-                />
-                <Playhead sec={playheadFrame / fps} pxPerSec={pxPerSec} height={22 + (model.segDoc ? 43 : 0) + (blocks.length > 0 ? 43 : 0) + (hasCaptions ? 41 : 0) + 18 + 3 * 41} />
-                {sel?.t === 'range' && (
-                  <SelectionBand
-                    startSec={sel.startMs / 1000}
-                    endSec={sel.endMs / 1000}
-                    pxPerSec={pxPerSec}
-                    height={22 + (model.segDoc ? 43 : 0) + (blocks.length > 0 ? 43 : 0) + (hasCaptions ? 41 : 0) + 18 + 3 * 41}
-                  />
-                )}
-              </div>
-              <div style={{ position: 'relative' }}>
-                {model.segDoc && (
-                  <TrackRow
-                    label="SEG"
-                    height={42}
-                    width={trackWidth}
-                    trailing={<BrollPicker footageAssets={ctx.footageAssets} onInsert={insertBroll} />}
-                  >
-                    <SegmentTrack
-                      placed={placed}
-                      fps={model.segDoc.fps}
-                      pxPerSec={pxPerSec}
-                      selectedIndex={sel?.t === 'seg' ? sel.index : null}
-                      onSelect={(index) => setSel({ t: 'seg', index })}
-                      onReorder={reorderSegment}
-                      onDragStart={beginDrag}
-                      onDragMove={onSegDrag}
-                      onDragEnd={endDrag}
-                    />
-                  </TrackRow>
-                )}
-                {blocks.length > 0 && (
-                  <TrackRow label="SCN" height={42} width={trackWidth}>
-                    <SceneTrack
-                      blocks={blocks}
-                      pxPerSec={pxPerSec}
-                      selectedIndex={sel?.t === 'scene' ? sel.index : null}
-                      onSelect={(index) => setSel({ t: 'scene', index })}
-                      onDragStart={beginDrag}
-                      onDragMove={onSceneDrag}
-                      onDragEnd={endDrag}
-                    />
-                  </TrackRow>
-                )}
-                {hasCaptions && (
-                  <TrackRow label="TXT" height={40} width={trackWidth}>
-                    <CaptionTrack
-                      chips={chips}
-                      pxPerSec={pxPerSec}
-                      emphasis={model.emphasis}
-                      selected={sel?.t === 'word' ? sel.id : null}
-                      onSelect={(id) => setSel({ t: 'word', id })}
-                      onToggleEmphasis={(chip) => editEmphasis(chip.text)}
-                      onDragStart={beginDrag}
-                      onDragMove={onChipDrag}
-                      onDragEnd={endDrag}
-                    />
-                  </TrackRow>
-                )}
-                <div
-                  data-testid="ft-lufs-chip"
-                  className="mono"
-                  style={{ paddingLeft: 60, fontSize: 10, color: 'var(--muted)', height: 18, lineHeight: '18px', borderBottom: '1px solid var(--hairline)', background: 'var(--surface-1)', position: 'sticky', left: 0 }}
-                >
-                  🔒 delivery master locked: −14 LUFS / −1 dBTP (loudnorm) — track gains feed the duck, never the master
-                </div>
-                <AudioTracksUI
-                  tracks={model.audioMix.tracks}
-                  width={trackWidth}
-                  pxPerSec={pxPerSec}
-                  audioAssets={ctx.audioAssets}
-                  srcExists={ctx.srcExists}
-                  selectedId={sel?.t === 'audio' ? sel.id : null}
-                  onSelect={(id) => setSel({ t: 'audio', id })}
-                  onAdd={(role, src) => commit({ ...model, audioMix: { ...model.audioMix, tracks: addTrack(model.audioMix.tracks, role, src) } })}
-                  onDragStart={beginDrag}
-                  onDragMove={onAudioDrag}
-                  onDragEnd={endDrag}
-                />
-              </div>
-            </div>
-          </div>
         </div>
 
-        {/* inspector */}
-        <div style={{ background: 'var(--surface-1)', border: '1px solid var(--hairline)', borderRadius: 'var(--radius-sm)', padding: 12, minHeight: 160 }}>
+        {/* backdrop behind the narrow-pane inspector slide-over (§6) */}
+        {narrow && railOpen && (
+          <div aria-hidden onClick={() => setSel(null)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.38)', zIndex: 4 }} />
+        )}
+
+        {/* inspector — a full-height rail on desktop, a right slide-over on a narrow pane (§3.3/§6) */}
+        <div
+          ref={railRef}
+          data-testid="ft-inspector-rail"
+          role={narrow ? 'dialog' : 'region'}
+          aria-label="Inspector"
+          aria-modal={narrow && railOpen ? true : undefined}
+          tabIndex={narrow ? -1 : undefined}
+          onKeyDown={narrow ? (e) => { if (e.key === 'Escape') { e.stopPropagation(); setSel(null); } } : undefined}
+          style={
+            narrow
+              ? {
+                  display: railOpen ? 'block' : 'none',
+                  position: 'absolute',
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  width: 'min(340px, 92%)',
+                  zIndex: 5,
+                  background: 'var(--surface-1)',
+                  borderLeft: '1px solid var(--hairline)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: 12,
+                  overflowY: 'auto',
+                  boxShadow: '-14px 0 30px rgba(0,0,0,0.4)',
+                  outline: 'none',
+                }
+              : {
+                  flex: '0 0 320px',
+                  minHeight: 0,
+                  background: 'var(--surface-1)',
+                  border: '1px solid var(--hairline)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: 12,
+                  overflowY: 'auto',
+                }
+          }
+        >
           {sel?.t === 'range' &&
             (() => {
               const span = rangeSpan(
@@ -1397,10 +1447,69 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
                 sel.endMs,
               );
               const segCount = model.segDoc?.segments.length ?? 0;
+              // VE.7.1 — range-scoped audio. Controls act on the clip currently covering the range
+              // MIDPOINT (stable across repeated drags: applyRange* splits once, then edits the inner
+              // clip in place). Footage gain/mute act on the spanned video segments.
+              const startSec = span.startMs / 1000;
+              const endSec = span.endMs / 1000;
+              const midSec = (startSec + endSec) / 2;
+              const clipsAtMid = model.audioMix.tracks
+                .filter((t) => {
+                  const s = t.offsetSec;
+                  const e = t.durationSec != null ? s + t.durationSec : Infinity;
+                  return midSec >= s && midSec < e;
+                })
+                .map((t) => ({ id: t.id, role: t.role, src: t.src, gainDb: t.gainDb, ducked: !!t.duck }));
+              const segs = model.segDoc?.segments ?? [];
+              const footageGainDb = span.segIndexes.length ? segs[span.segIndexes[0]]?.audioGainDb ?? 0 : 0;
+              const footageMuted = span.segIndexes.some((i) => !!segs[i]?.audioMute);
+              const commitTracks = (tracks: AudioTrack[]) => commit({ ...model, audioMix: { ...model.audioMix, tracks } });
               return (
                 <RangeInspector
                   span={span}
                   onClear={() => setSel(null)}
+                  audioPanel={
+                    <RangeAudioControls
+                      clips={clipsAtMid}
+                      onClipGain={(id, g) => commitTracks(applyRangeGain(model.audioMix.tracks, id, startSec, endSec, g))}
+                      onClipMute={(id) => commitTracks(applyRangeMute(model.audioMix.tracks, id, startSec, endSec))}
+                      onClipDuck={(id, depth) => commitTracks(applyRangeDuck(model.audioMix.tracks, id, startSec, endSec, depth))}
+                      footageCount={span.segIndexes.length}
+                      footageGainDb={footageGainDb}
+                      footageMuted={footageMuted}
+                      onFootageGain={(g) =>
+                        model.segDoc &&
+                        commit({ ...model, segDoc: { ...model.segDoc, segments: applyRangeFootageGain(model.segDoc.segments, span.segIndexes, g) } })
+                      }
+                      onFootageMute={(mute) =>
+                        model.segDoc &&
+                        commit({ ...model, segDoc: { ...model.segDoc, segments: applyRangeFootageMute(model.segDoc.segments, span.segIndexes, mute) } })
+                      }
+                      audioAssets={ctx.audioAssets}
+                      onInsert={(role, src) => commitTracks(addTrack(model.audioMix.tracks, role, src, startSec))}
+                    />
+                  }
+                  agentField={
+                    canAskAgent ? (
+                      <AskAgentField
+                        onAsk={() => {
+                          // VE.6.1 — drop the visible scope prefix into the shared composer (text, not a
+                          // hidden channel); the user types the instruction and sends a normal turn.
+                          const text = formatSelectionForAgent({
+                            project,
+                            kind: 'range',
+                            label: `${fmtRangeTime(span.startMs)}–${fmtRangeTime(span.endMs)}`,
+                            detail: '',
+                            timeWindowMs: { startMs: span.startMs, endMs: span.endMs },
+                            affectedDocs: span.affectedDocs,
+                          });
+                          window.dispatchEvent(
+                            new CustomEvent(COMPOSER_PREFILL_EVENT, { detail: { text: `${text} ` } }),
+                          );
+                        }}
+                      />
+                    ) : undefined
+                  }
                   toolbar={
                     model.segDoc ? (
                       <div data-testid="ft-range-verbs" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1499,6 +1608,12 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
                 });
                 commit({ ...model, segDoc: { ...model.segDoc!, segments: segs } });
               }}
+              onSetAudioGain={(g) =>
+                commit({ ...model, segDoc: { ...model.segDoc!, segments: setSegmentAudioGain(model.segDoc!.segments, sel.index, g) } })
+              }
+              onSetAudioMute={(mute) =>
+                commit({ ...model, segDoc: { ...model.segDoc!, segments: setSegmentAudioMute(model.segDoc!.segments, sel.index, mute) } })
+              }
             />
           )}
           {sel?.t === 'scene' && selScene && blocksPath && model.props && (
@@ -1577,16 +1692,191 @@ export function FineTune({ project, runningStage }: { project: string; runningSt
             </InspectorShell>
           )}
           {!sel && (!ctx.schemaEntry || !model.props) && (
-            <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.6 }}>
-              Select a word, segment or audio pill to fine-tune it — or drag on the ruler to select a time range.
-              <br />
-              Drag chip edges to retime · double-click a word for emphasis · drag the ruler for a range · Ctrl+Z undoes.
+            // VE.7.5 §5.1 — a warm, centered resting state (the contrast bump --muted→--secondary on
+            // the heading is also the a11y fix), not a cold gray sentence stranded at the top.
+            <div
+              data-testid="ft-inspector-empty"
+              style={{ height: '100%', minHeight: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', gap: 8, padding: '8px 6px' }}
+            >
+              <div aria-hidden style={{ fontSize: 22, color: 'var(--muted)', lineHeight: 1 }}>◎</div>
+              <div style={{ color: 'var(--secondary)', fontSize: 13, fontWeight: 700 }}>Nothing selected yet</div>
+              <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.5, maxWidth: 260 }}>
+                Click a word, segment, or audio pill to fine-tune it — or drag on the ruler to select a time range.
+              </div>
+              <ul style={{ listStyle: 'none', margin: '4px 0 0', padding: 0, color: 'var(--muted)', fontSize: 11.5, lineHeight: 1.7 }}>
+                <li>Drag chip edges to retime</li>
+                <li>Double-click a word for emphasis</li>
+                <li>
+                  <span className="mono">Ctrl+Z</span> undoes
+                </li>
+              </ul>
             </div>
           )}
         </div>
       </div>
+
+      {/* VE.7.5 §5.3 — the full-width timeline dock below the stage. A top splitter resizes it
+          (keyboard ↑/↓ · Home/End); overflowY:auto so a tall track stack scrolls in-dock, never
+          clips. dockRef is the fit-to-width measure target (the ResizeObserver above). */}
+      <div style={{ flex: `0 0 ${dockHeight}px`, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize timeline"
+          aria-valuenow={dockHeight}
+          aria-valuemin={DOCK_MIN}
+          aria-valuemax={DOCK_MAX}
+          tabIndex={0}
+          data-testid="ft-dock-resize"
+          title="Drag to resize the timeline (↑ / ↓ to nudge, Home / End for min / max)"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            dockResize.current = { startY: e.clientY, startH: dockHeight };
+            (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+          }}
+          onPointerMove={(e) => {
+            const r = dockResize.current;
+            if (!r) return;
+            setDockHeight(clampDock(r.startH + (r.startY - e.clientY)));
+          }}
+          onPointerUp={(e) => {
+            dockResize.current = null;
+            (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setDockHeight((h) => clampDock(h + 20));
+            } else if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setDockHeight((h) => clampDock(h - 20));
+            } else if (e.key === 'Home') {
+              e.preventDefault();
+              setDockHeight(DOCK_MIN);
+            } else if (e.key === 'End') {
+              e.preventDefault();
+              setDockHeight(DOCK_MAX);
+            }
+          }}
+          style={{ flex: '0 0 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'row-resize', outline: 'none' }}
+        >
+          <div aria-hidden style={{ width: 46, height: 4, borderRadius: 999, background: 'var(--hairline)' }} />
+        </div>
+        <div
+          ref={dockRef}
+          data-testid="ft-timeline"
+          style={{ flex: 1, minHeight: 0, border: '1px solid var(--hairline)', borderRadius: 'var(--radius-sm)', overflowX: 'auto', overflowY: 'auto', background: 'var(--surface-1)', position: 'relative' }}
+          onClick={() => {
+            if (suppressClearRef.current) {
+              suppressClearRef.current = false;
+              return;
+            }
+            setSel(null);
+          }}
+        >
+          <div style={{ position: 'relative', width: trackWidth + 52, minWidth: '100%' }}>
+            <div style={{ marginLeft: 52, position: 'relative' }}>
+              <Ruler
+                durationSec={durationSec}
+                pxPerSec={pxPerSec}
+                onSeek={seekTo}
+                onRangeMove={(a, b) => setSel({ t: 'range', startMs: a * 1000, endMs: b * 1000 })}
+                onRangeEnd={(a, b) => {
+                  suppressClearRef.current = true;
+                  setSel(b - a < 0.02 ? null : { t: 'range', startMs: a * 1000, endMs: b * 1000 });
+                }}
+              />
+              <Playhead sec={playheadFrame / fps} pxPerSec={pxPerSec} height={22 + (model.segDoc ? 43 : 0) + (blocks.length > 0 ? 43 : 0) + (hasCaptions ? 41 : 0) + 18 + 3 * 41} />
+              {sel?.t === 'range' && (
+                <SelectionBand
+                  startSec={sel.startMs / 1000}
+                  endSec={sel.endMs / 1000}
+                  pxPerSec={pxPerSec}
+                  height={22 + (model.segDoc ? 43 : 0) + (blocks.length > 0 ? 43 : 0) + (hasCaptions ? 41 : 0) + 18 + 3 * 41}
+                />
+              )}
+            </div>
+            <div style={{ position: 'relative' }}>
+              {model.segDoc && (
+                <TrackRow
+                  label="SEG"
+                  height={42}
+                  width={trackWidth}
+                  trailing={<BrollPicker footageAssets={ctx.footageAssets} onInsert={insertBroll} />}
+                >
+                  <SegmentTrack
+                    placed={placed}
+                    fps={model.segDoc.fps}
+                    pxPerSec={pxPerSec}
+                    selectedIndex={sel?.t === 'seg' ? sel.index : null}
+                    onSelect={(index) => setSel({ t: 'seg', index })}
+                    onReorder={reorderSegment}
+                    onDragStart={beginDrag}
+                    onDragMove={onSegDrag}
+                    onDragEnd={endDrag}
+                  />
+                </TrackRow>
+              )}
+              {blocks.length > 0 && (
+                <TrackRow label="SCN" height={42} width={trackWidth}>
+                  <SceneTrack
+                    blocks={blocks}
+                    pxPerSec={pxPerSec}
+                    selectedIndex={sel?.t === 'scene' ? sel.index : null}
+                    onSelect={(index) => setSel({ t: 'scene', index })}
+                    onDragStart={beginDrag}
+                    onDragMove={onSceneDrag}
+                    onDragEnd={endDrag}
+                  />
+                </TrackRow>
+              )}
+              {hasCaptions && (
+                <TrackRow label="TXT" height={40} width={trackWidth}>
+                  <CaptionTrack
+                    chips={chips}
+                    pxPerSec={pxPerSec}
+                    emphasis={model.emphasis}
+                    selected={sel?.t === 'word' ? sel.id : null}
+                    onSelect={(id) => setSel({ t: 'word', id })}
+                    onToggleEmphasis={(chip) => editEmphasis(chip.text)}
+                    onDragStart={beginDrag}
+                    onDragMove={onChipDrag}
+                    onDragEnd={endDrag}
+                  />
+                </TrackRow>
+              )}
+              <div
+                data-testid="ft-lufs-chip"
+                className="mono"
+                style={{ paddingLeft: 60, fontSize: 10, color: 'var(--muted)', height: 18, lineHeight: '18px', borderBottom: '1px solid var(--hairline)', background: 'var(--surface-1)', position: 'sticky', left: 0 }}
+              >
+                🔒 delivery master locked: −14 LUFS / −1 dBTP (loudnorm) — track gains feed the duck, never the master
+              </div>
+              <AudioTracksUI
+                tracks={model.audioMix.tracks}
+                width={trackWidth}
+                pxPerSec={pxPerSec}
+                audioAssets={ctx.audioAssets}
+                srcExists={ctx.srcExists}
+                selectedId={sel?.t === 'audio' ? sel.id : null}
+                onSelect={(id) => setSel({ t: 'audio', id })}
+                onAdd={(role, src) => commit({ ...model, audioMix: { ...model.audioMix, tracks: addTrack(model.audioMix.tracks, role, src) } })}
+                onDragStart={beginDrag}
+                onDragMove={onAudioDrag}
+                onDragEnd={endDrag}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
+}
+
+/** VE.7.5 §5.2 — a thin vertical hairline that groups the toolbar (source │ history │ zoom+Save).
+ *  Visual only; hidden from a11y. */
+function ToolbarSep() {
+  return <div aria-hidden style={{ width: 1, alignSelf: 'stretch', minHeight: 18, background: 'var(--hairline)', margin: '0 2px' }} />;
 }
 
 /** A type guard import-cycle helper: AudioTrack is referenced by props above. */

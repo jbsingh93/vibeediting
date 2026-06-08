@@ -41,6 +41,10 @@ export interface EdlSegment {
   transition?: Transition;
   /** Ordered per-clip effects stack. Absent ⇒ no-op. */
   effects?: Effect[];
+  /** D34: this clip's OWN (footage) audio level in dB over the auto fade. Absent ⇒ 0 dB (×1). */
+  audioGainDb?: number;
+  /** D34: silence this clip's footage audio (video keeps playing). Absent/false ⇒ audible. */
+  audioMute?: boolean;
 }
 
 export interface SegmentsDoc {
@@ -58,6 +62,10 @@ export interface AudioTrack {
   offsetSec: number;
   gainDb: number;
   duck?: { depth: number };
+  /** D34: source in-point (sec) for a split clip. Absent ⇒ 0 (plays from the file head). */
+  srcInSec?: number;
+  /** D34: output length (sec) of this clip. Absent ⇒ plays to the end of the timeline (legacy). */
+  durationSec?: number;
 }
 
 export interface AudioMixDoc {
@@ -75,6 +83,8 @@ export const audioTrackSchema = z.object({
   offsetSec: z.number().min(0).default(0),
   gainDb: z.number().min(-36).max(12).default(0),
   duck: z.object({ depth: z.number().min(0).max(1).default(0.12) }).optional(),
+  srcInSec: z.number().min(0).optional(),
+  durationSec: z.number().positive().optional(),
 });
 
 /** client-side mirror of the server + template EDL schema (same zod; transition/effects optional). */
@@ -108,6 +118,8 @@ export const edlSegmentSchema = z.object({
   cap: z.string().optional(),
   transition: transitionSchema.optional(),
   effects: z.array(effectSchema).optional(),
+  audioGainDb: z.number().min(-36).max(12).optional(),
+  audioMute: z.boolean().optional(),
 });
 export const segmentsDocSchema = z.object({
   fps: z.number().positive(),
@@ -721,6 +733,17 @@ export function gainDbToAmplitude(gainDb: number): number {
 }
 
 /**
+ * A clip's FOOTAGE (own) audio multiplier (D34) — applied on top of the OffthreadVideo fade
+ * envelope in BOTH comps. `audioMute` ⇒ 0 (silent, video plays on); else `audioGainDb` in dB
+ * (absent ⇒ ×1, so a legacy segment is byte-identical and renders unchanged). Pure → a VERBATIM
+ * MIRROR of the same fn in `template/src/components/edl.ts`. Change BOTH or `preview == render` breaks.
+ */
+export function footageGain(seg: { audioGainDb?: number; audioMute?: boolean }): number {
+  if (seg.audioMute) return 0;
+  return seg.audioGainDb == null ? 1 : gainDbToAmplitude(seg.audioGainDb);
+}
+
+/**
  * Pick the default render-preview background (Julian 2026-06-07: fine-tune is an editor over the
  * RENDERED VERSIONS). When the editable data can reconstruct video itself (EDL segments or a
  * props.videoSrc), the data preview stays the default; otherwise the NEWEST render wins over a
@@ -789,14 +812,163 @@ export function setTrackDuck(tracks: AudioTrack[], id: string, depth: number | n
   });
 }
 
-/** Add a track from a project audio asset; id de-duplicates against existing track ids. */
-export function addTrack(tracks: AudioTrack[], role: AudioTrack['role'], src: string): AudioTrack[] {
-  const base = role + '-' + (src.split('/').pop() ?? 'track').replace(/\.[a-z0-9]+$/i, '');
+/** Unique track id from `base`, de-duplicated against the existing ids (`base`, `base-2`, …). */
+function dedupeTrackId(tracks: AudioTrack[], base: string): string {
   let id = base;
   let n = 2;
   while (tracks.some((t) => t.id === id)) id = `${base}-${n++}`;
+  return id;
+}
+
+/**
+ * Add a track from a project audio asset; id de-duplicates against existing track ids. `offsetSec`
+ * places it on the output timeline (VE.7.2 — insert at a range start; default 0 = the head).
+ */
+export function addTrack(
+  tracks: AudioTrack[],
+  role: AudioTrack['role'],
+  src: string,
+  offsetSec = 0,
+): AudioTrack[] {
+  const base = role + '-' + (src.split('/').pop() ?? 'track').replace(/\.[a-z0-9]+$/i, '');
+  const id = dedupeTrackId(tracks, base);
   const duck = role === 'bgm' ? { depth: DEFAULT_DUCK_DEPTH } : undefined;
-  return [...tracks, { id, role, src, offsetSec: 0, gainDb: role === 'bgm' ? -12 : 0, ...(duck ? { duck } : {}) }];
+  return [
+    ...tracks,
+    { id, role, src, offsetSec: round2(Math.max(0, offsetSec)), gainDb: role === 'bgm' ? -12 : 0, ...(duck ? { duck } : {}) },
+  ];
+}
+
+// ── range-scoped audio: split a continuous track into clips (D34, VE.7.1) ─────────
+//
+// The chosen model (Julian, AskUserQuestion): a range edit SPLITS the track into clips, each its
+// own level — not a keyframe envelope. A clip gains `srcInSec` (where in the file it starts) +
+// `durationSec` (its output length); absent ⇒ legacy "plays from the head to the end". From this
+// the three range verbs fall out of ops we already have: dip = split×2 + setTrackGain on the inner
+// clip; mute = split×2 + drop the inner clip (the gap is silence, audio resumes IN SYNC because the
+// trailing clip keeps its srcInSec); duck = split×2 + setTrackDuck. The −14 LUFS master is a render
+// post-pass over the whole mix, so it is untouched by any per-clip level here.
+
+/** Output end of a clip in sec (offset + duration), or +∞ when it plays to the timeline end. */
+const clipEndSec = (t: AudioTrack): number => (t.durationSec == null ? Infinity : t.offsetSec + t.durationSec);
+
+/** Minimum clip length (sec) a split may leave on either side — keeps durationSec safely positive. */
+export const MIN_CLIP_SEC = 0.05;
+
+/** The id of the clip on its lane that STARTS at `sec` (within 10 ms), or null. */
+function clipStartingAt(tracks: AudioTrack[], sec: number): string | null {
+  const hit = tracks.find((t) => Math.abs(t.offsetSec - sec) < 0.01);
+  return hit ? hit.id : null;
+}
+
+/**
+ * Split the clip `id` at OUTPUT-time second `atOutputSec` into two contiguous, gapless clips.
+ * The first keeps the id + duration up to the cut; the second (`<id>-b`, de-duped) advances its
+ * `srcInSec` by the first half's length so the source plays continuously. No-op (returns the same
+ * array) if the cut is outside the clip or would leave < MIN_CLIP_SEC on either side.
+ */
+export function splitTrack(tracks: AudioTrack[], id: string, atOutputSec: number): AudioTrack[] {
+  const i = tracks.findIndex((t) => t.id === id);
+  if (i < 0) return tracks;
+  const t = tracks[i];
+  const start = t.offsetSec;
+  const end = clipEndSec(t);
+  if (atOutputSec <= start + MIN_CLIP_SEC || atOutputSec >= end - MIN_CLIP_SEC) return tracks;
+  const cut = round2(atOutputSec);
+  const firstDur = round2(cut - start);
+  const a: AudioTrack = { ...t, durationSec: firstDur };
+  const b: AudioTrack = {
+    ...t,
+    id: dedupeTrackId(tracks, `${t.id}-b`),
+    offsetSec: cut,
+    srcInSec: round2((t.srcInSec ?? 0) + firstDur),
+  };
+  if (t.durationSec == null) delete b.durationSec;
+  else b.durationSec = round2(end - cut);
+  const next = [...tracks];
+  next.splice(i, 1, a, b);
+  return next;
+}
+
+/**
+ * Carve the intersection of [startSec,endSec) with clip `id` into its own clip (splitting at both
+ * edges as needed) and run `mutate` on that inner clip. The shared engine behind the range verbs.
+ */
+function withRangeClip(
+  tracks: AudioTrack[],
+  id: string,
+  startSec: number,
+  endSec: number,
+  mutate: (tracks: AudioTrack[], innerId: string) => AudioTrack[],
+): AudioTrack[] {
+  const orig = tracks.find((t) => t.id === id);
+  if (!orig) return tracks;
+  const lo = round2(Math.max(startSec, orig.offsetSec));
+  const hi = round2(Math.min(endSec, clipEndSec(orig)));
+  if (!(hi - lo >= MIN_CLIP_SEC)) return tracks;
+  let next = splitTrack(tracks, id, lo);
+  const midId = clipStartingAt(next, lo) ?? id;
+  next = splitTrack(next, midId, hi);
+  const innerId = clipStartingAt(next, lo);
+  if (!innerId) return next;
+  return mutate(next, innerId);
+}
+
+/** Range verb — set the level (dB) of track `id` ONLY within [startSec,endSec) (split + setGain). */
+export function applyRangeGain(tracks: AudioTrack[], id: string, startSec: number, endSec: number, gainDb: number): AudioTrack[] {
+  return withRangeClip(tracks, id, startSec, endSec, (t, inner) => setTrackGain(t, inner, gainDb));
+}
+
+/** Range verb — duck track `id` ONLY within [startSec,endSec) (`null` clears duck on the window). */
+export function applyRangeDuck(tracks: AudioTrack[], id: string, startSec: number, endSec: number, depth: number | null): AudioTrack[] {
+  return withRangeClip(tracks, id, startSec, endSec, (t, inner) => setTrackDuck(t, inner, depth));
+}
+
+/** Range verb — mute track `id` within [startSec,endSec): split it out, then drop the inner clip. */
+export function applyRangeMute(tracks: AudioTrack[], id: string, startSec: number, endSec: number): AudioTrack[] {
+  return withRangeClip(tracks, id, startSec, endSec, (t, inner) => t.filter((x) => x.id !== inner));
+}
+
+// ── footage (per-segment) audio (D34, VE.7.1) ────────────────────────────────────
+
+/** Set/clear a segment's own footage-audio gain (dB). `null` removes the field (back to 0 dB). */
+export function setSegmentAudioGain(segments: EdlSegment[], index: number, gainDb: number | null): EdlSegment[] {
+  const s = segments[index];
+  if (!s) return segments;
+  const next = [...segments];
+  if (gainDb == null) {
+    const r = { ...s };
+    delete r.audioGainDb;
+    next[index] = r;
+  } else {
+    next[index] = { ...s, audioGainDb: clamp(Math.round(gainDb * 10) / 10, -36, 12) };
+  }
+  return next;
+}
+
+/** Mute/unmute a segment's footage audio (video keeps playing). `false` removes the field. */
+export function setSegmentAudioMute(segments: EdlSegment[], index: number, mute: boolean): EdlSegment[] {
+  const s = segments[index];
+  if (!s) return segments;
+  const next = [...segments];
+  if (!mute) {
+    const r = { ...s };
+    delete r.audioMute;
+    next[index] = r;
+  } else {
+    next[index] = { ...s, audioMute: true };
+  }
+  return next;
+}
+
+/** Apply a footage-audio gain (or `null` to clear) to every segment the range spans (VE.7.1). */
+export function applyRangeFootageGain(segments: EdlSegment[], indexes: number[], gainDb: number | null): EdlSegment[] {
+  return indexes.reduce((segs, i) => setSegmentAudioGain(segs, i, gainDb), segments);
+}
+
+/** Mute/unmute footage audio for every segment the range spans (VE.7.1). */
+export function applyRangeFootageMute(segments: EdlSegment[], indexes: number[], mute: boolean): EdlSegment[] {
+  return indexes.reduce((segs, i) => setSegmentAudioMute(segs, i, mute), segments);
 }
 
 // ── timeline geometry + undo ────────────────────────────────────────────────────
@@ -804,6 +976,54 @@ export function addTrack(tracks: AudioTrack[], role: AudioTrack['role'], src: st
 /** ms → px at a zoom of `pxPerSec`. */
 export const msToX = (ms: number, pxPerSec: number) => (ms / 1000) * pxPerSec;
 export const xToMs = (x: number, pxPerSec: number) => (x / pxPerSec) * 1000;
+
+/** The SEG/TXT/VO label column offset that every track lane is pushed right by (FineTune.tsx). */
+export const TIMELINE_LABEL_GUTTER = 52;
+/** zoom-slider bounds (the manual override range; auto-fit clamps to the same window). */
+export const PX_PER_SEC_MIN = 20;
+export const PX_PER_SEC_MAX = 300;
+/** the fallback zoom before the timeline dock has been measured (VE.7.5 §4.2). */
+export const PX_PER_SEC_DEFAULT = 60;
+
+/**
+ * VE.7.5 §4 — fit the whole clip to the timeline dock width on load (the headline un-cramping win).
+ * Pure arithmetic so it unit-tests without a DOM: subtract the label gutter, divide the usable
+ * width by the clip length, clamp to the zoom-slider window. `dockWidth===0` (first paint, before
+ * the ResizeObserver fires) falls back to the default — never a divide-by-zero or a 0-width flash.
+ */
+export function fitPxPerSec(dockWidth: number, durationSec: number): number {
+  if (!Number.isFinite(dockWidth) || dockWidth <= 0) return PX_PER_SEC_DEFAULT;
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return PX_PER_SEC_DEFAULT;
+  const usable = Math.max(0, dockWidth - TIMELINE_LABEL_GUTTER);
+  const fit = usable / durationSec;
+  return Math.max(PX_PER_SEC_MIN, Math.min(PX_PER_SEC_MAX, Math.round(fit)));
+}
+
+/**
+ * VE.7.5 §3.2 — how the preview box sizes inside the centered stage. Portrait (9:16, the common
+ * case) is HEIGHT-driven so it grows to the stage and reads as deliberate; landscape keeps the
+ * legacy width-driven branch (it already filled reasonably — don't regress it). Pure so the
+ * branch choice is unit-tested without rendering a Player. `w`/`h` are the live comp/render dims.
+ */
+export interface PreviewLayout {
+  portrait: boolean;
+  /** style for the bordered preview box (the @remotion/player's parent). */
+  box: { width?: string; height?: string; maxHeight?: string; aspectRatio?: string; margin: string };
+  /** style spread onto the <Player>. */
+  player: { width?: string; height?: string };
+}
+export function previewLayout(width: number, height: number): PreviewLayout {
+  const w = Number.isFinite(width) && width > 0 ? width : 1080;
+  const h = Number.isFinite(height) && height > 0 ? height : 1920;
+  if (h >= w) {
+    return {
+      portrait: true,
+      box: { height: '100%', maxHeight: 'min(100%, 78vh)', aspectRatio: `${w} / ${h}`, margin: '0 auto' },
+      player: { height: '100%' },
+    };
+  }
+  return { portrait: false, box: { width: 'min(640px, 100%)', margin: '0 auto' }, player: { width: '100%' } };
+}
 
 /** Snap a time to the nearest candidate within `thresholdMs` (drag snapping). */
 export function snapMs(ms: number, candidates: number[], thresholdMs: number): number {

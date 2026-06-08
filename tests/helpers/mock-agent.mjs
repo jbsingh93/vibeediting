@@ -187,6 +187,21 @@ function applyScenario(s) {
   const root = process.env.VIBE_PROJECTS_DIR;
   if (!project || !root) return;
   const dir = path.join(path.resolve(root), project);
+  // VE.6 — a range-scoped "Ask Editor Agent" turn rewrites editable docs in public/<project>/, just
+  // like a real turn (the adapter spawns us with cwd = the project dir). The editor's disk-diff poll
+  // then surfaces the change as the accept/reject card. `docs: [{ name, data }]`.
+  for (const d of s.docs || []) {
+    try {
+      const pubDir = path.join(process.cwd(), 'public', project);
+      fs.mkdirSync(pubDir, { recursive: true });
+      const name = path.basename(d.name);
+      const tmp = path.join(pubDir, `${name}.${process.pid}.tmp`);
+      fs.writeFileSync(tmp, typeof d.data === 'string' ? d.data : JSON.stringify(d.data));
+      fs.renameSync(tmp, path.join(pubDir, name));
+    } catch {
+      /* the test's assertions will catch a missed write */
+    }
+  }
   if (typeof s.brief === 'string') {
     try {
       fs.mkdirSync(dir, { recursive: true });

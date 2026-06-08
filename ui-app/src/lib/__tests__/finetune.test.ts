@@ -17,6 +17,12 @@ import {
   alignToVoice,
   applyRemappedWordEdit,
   edlTotalFrames,
+  fitPxPerSec,
+  previewLayout,
+  PX_PER_SEC_DEFAULT,
+  PX_PER_SEC_MIN,
+  PX_PER_SEC_MAX,
+  TIMELINE_LABEL_GUTTER,
   gainDbToAmplitude,
   historyInit,
   historyPush,
@@ -51,6 +57,15 @@ import {
   snapMs,
   toggleEmphasis,
   trackVolumeAt,
+  footageGain,
+  splitTrack,
+  applyRangeGain,
+  applyRangeDuck,
+  applyRangeMute,
+  applyRangeFootageGain,
+  applyRangeFootageMute,
+  setSegmentAudioGain,
+  setSegmentAudioMute,
   voWindows,
   pickDefaultRender,
   xToMs,
@@ -68,6 +83,7 @@ import {
   transitionFrames as templateTransitionFrames,
   transitionPresentation as templateTransitionPresentation,
   effectsPresentation as templateEffectsPresentation,
+  footageGain as templateFootageGain,
 } from '../../../../template/src/components/edl';
 import type { Effect } from '../finetune';
 
@@ -266,6 +282,104 @@ describe('audio: gain, duck, windows, tracks', () => {
   });
 });
 
+// ── range-scoped audio (VE.7.1 / D34) ───────────────────────────────────────────
+
+describe('range audio: footage gain, clip split, range verbs, insert-at', () => {
+  const bgm: AudioTrack = { id: 'bgm-1', role: 'bgm', src: 'p/bgm.mp3', offsetSec: 0, gainDb: -12, duck: { depth: 0.12 } };
+
+  it('footageGain: absent ⇒ ×1 (legacy byte-identical); dB scales; mute ⇒ 0', () => {
+    expect(footageGain({})).toBe(1);
+    expect(footageGain({ audioGainDb: 0 })).toBe(1);
+    expect(footageGain({ audioGainDb: -6 })).toBeCloseTo(0.501, 2);
+    expect(footageGain({ audioMute: true })).toBe(0);
+    expect(footageGain({ audioGainDb: 6, audioMute: true })).toBe(0); // mute wins
+  });
+
+  it('footageGain mirrors the template owner over a fixture matrix (preview == render)', () => {
+    for (const seg of [{}, { audioGainDb: -12 }, { audioGainDb: 9 }, { audioMute: true }, { audioGainDb: -3, audioMute: false }]) {
+      expect(footageGain(seg)).toBeCloseTo(templateFootageGain(seg), 12);
+    }
+  });
+
+  it('splitTrack: a to-end track splits into two gapless clips with advanced srcInSec', () => {
+    const out = splitTrack([bgm], 'bgm-1', 5);
+    expect(out).toHaveLength(2);
+    const [a, b] = out;
+    expect(a).toMatchObject({ id: 'bgm-1', offsetSec: 0, durationSec: 5 });
+    expect(b).toMatchObject({ id: 'bgm-1-b', offsetSec: 5, srcInSec: 5 });
+    expect(b.durationSec).toBeUndefined(); // still plays to the end
+  });
+
+  it('splitTrack: a bounded clip splits its duration; no-op outside / on a boundary', () => {
+    const bounded: AudioTrack = { ...bgm, offsetSec: 2, durationSec: 10, srcInSec: 1 };
+    const [a, b] = splitTrack([bounded], 'bgm-1', 7); // cut 5s into a 10s clip
+    expect(a).toMatchObject({ offsetSec: 2, durationSec: 5 });
+    expect(b).toMatchObject({ offsetSec: 7, srcInSec: 6, durationSec: 5 });
+    expect(splitTrack([bounded], 'bgm-1', 2)).toHaveLength(1); // on the left edge → no-op
+    expect(splitTrack([bounded], 'bgm-1', 99)).toHaveLength(1); // past the end → no-op
+  });
+
+  it('applyRangeGain: dips ONLY the in-window clip, leaving the head/tail at the base gain', () => {
+    const out = applyRangeGain([bgm], 'bgm-1', 5, 10, -30);
+    expect(out).toHaveLength(3);
+    const [head, mid, tail] = out;
+    expect(head).toMatchObject({ offsetSec: 0, durationSec: 5, gainDb: -12 });
+    expect(mid).toMatchObject({ offsetSec: 5, durationSec: 5, gainDb: -30 });
+    expect(tail).toMatchObject({ offsetSec: 10, gainDb: -12 });
+    expect(tail.srcInSec).toBe(10); // source stays continuous across the dip
+  });
+
+  it('applyRangeGain is stable on repeat (re-drag the same window only re-sets the inner gain)', () => {
+    const once = applyRangeGain([bgm], 'bgm-1', 5, 10, -30);
+    const mid = once.find((t) => Math.abs(t.offsetSec - 5) < 0.01)!;
+    const twice = applyRangeGain(once, mid.id, 5, 10, -24);
+    expect(twice).toHaveLength(3); // no extra splits
+    expect(twice.find((t) => Math.abs(t.offsetSec - 5) < 0.01)!.gainDb).toBe(-24);
+  });
+
+  it('applyRangeMute: drops the in-window clip (gap = silence), tail resumes in sync', () => {
+    const out = applyRangeMute([bgm], 'bgm-1', 5, 10);
+    expect(out).toHaveLength(2);
+    expect(out.map((t) => t.offsetSec)).toEqual([0, 10]);
+    expect(out[1]!.srcInSec).toBe(10); // resumes at source 10s — no drift
+  });
+
+  it('applyRangeDuck: ducks ONLY the in-window clip', () => {
+    const flat: AudioTrack = { ...bgm, duck: undefined };
+    const out = applyRangeDuck([flat], 'bgm-1', 5, 10, 0.12);
+    const mid = out.find((t) => Math.abs(t.offsetSec - 5) < 0.01)!;
+    expect(mid.duck).toEqual({ depth: 0.12 });
+    expect(out.find((t) => t.offsetSec === 0)!.duck).toBeUndefined();
+  });
+
+  it('addTrack(offsetSec) places a new track at the range start (VE.7.2)', () => {
+    const out = addTrack([], 'sfx', 'p/whoosh.mp3', 4.2);
+    expect(out[0]).toMatchObject({ role: 'sfx', offsetSec: 4.2, gainDb: 0 });
+  });
+
+  it('segment footage helpers: gain clamps + null clears; mute toggles; range variants map indexes', () => {
+    const segs: EdlSegment[] = [
+      { id: 's1', srcStart: 0, srcEnd: 2 },
+      { id: 's2', srcStart: 2, srcEnd: 4 },
+      { id: 's3', srcStart: 4, srcEnd: 6 },
+    ];
+    expect(setSegmentAudioGain(segs, 0, 99)[0]!.audioGainDb).toBe(12);
+    expect(setSegmentAudioGain(setSegmentAudioGain(segs, 0, -6), 0, null)[0]).not.toHaveProperty('audioGainDb');
+    expect(setSegmentAudioMute(segs, 1, true)[1]!.audioMute).toBe(true);
+    expect(setSegmentAudioMute(setSegmentAudioMute(segs, 1, true), 1, false)[1]).not.toHaveProperty('audioMute');
+    const dipped = applyRangeFootageGain(segs, [0, 2], -9);
+    expect([dipped[0]!.audioGainDb, dipped[1]!.audioGainDb, dipped[2]!.audioGainDb]).toEqual([-9, undefined, -9]);
+    const muted = applyRangeFootageMute(segs, [1], true);
+    expect([!!muted[0]!.audioMute, !!muted[1]!.audioMute]).toEqual([false, true]);
+  });
+
+  it('backward-compat: a legacy track (no srcInSec/durationSec) is unchanged by trackVolumeAt', () => {
+    const legacy: AudioTrack = { id: 'x', role: 'bgm', src: 'p/b.mp3', offsetSec: 0, gainDb: -12 };
+    expect(legacy).not.toHaveProperty('srcInSec');
+    expect(trackVolumeAt(legacy, [], 3)).toBeCloseTo(gainDbToAmplitude(-12), 6);
+  });
+});
+
 // ── geometry + history ─────────────────────────────────────────────────────────
 
 describe('geometry + snapping + history', () => {
@@ -288,6 +402,61 @@ describe('geometry + snapping + history', () => {
     h = historyPush(h, 9);
     expect(h.future).toEqual([]);
     expect(h.past).toEqual([1, 2]);
+  });
+});
+
+// ── VE.7.5: editor layout overhaul (fit-to-clip zoom + preview sizing) ─────────────
+
+describe('VE.7.5 fitPxPerSec (fit the clip to the timeline dock width)', () => {
+  it('fills the lane: usable width / duration, gutter subtracted, rounded', () => {
+    // 1452px dock, 7.49s clip → (1452-52)/7.49 ≈ 186.9 → 187, inside the 20–300 window
+    expect(fitPxPerSec(1452, 7.49)).toBe(Math.round((1452 - TIMELINE_LABEL_GUTTER) / 7.49));
+    expect(fitPxPerSec(1452, 7.49)).toBe(187);
+  });
+  it('a short clip clamps at the max so it does not blow up to absurd px/s', () => {
+    // 2s clip in a 1400px lane would be 674 px/s — clamp to PX_PER_SEC_MAX
+    expect(fitPxPerSec(1400, 2)).toBe(PX_PER_SEC_MAX);
+  });
+  it('a long clip clamps at the min and the dock scrolls horizontally', () => {
+    expect(fitPxPerSec(1400, 600)).toBe(PX_PER_SEC_MIN);
+  });
+  it('an unmeasured dock (width 0) falls back to the default — no divide-by-zero / NaN', () => {
+    expect(fitPxPerSec(0, 7.49)).toBe(PX_PER_SEC_DEFAULT);
+    expect(Number.isNaN(fitPxPerSec(0, 7.49))).toBe(false);
+  });
+  it('guards non-finite / non-positive inputs', () => {
+    expect(fitPxPerSec(NaN, 7)).toBe(PX_PER_SEC_DEFAULT);
+    expect(fitPxPerSec(1400, 0)).toBe(PX_PER_SEC_DEFAULT);
+    expect(fitPxPerSec(1400, -3)).toBe(PX_PER_SEC_DEFAULT);
+    expect(fitPxPerSec(-10, 7)).toBe(PX_PER_SEC_DEFAULT);
+  });
+});
+
+describe('VE.7.5 previewLayout (height-driven portrait, width-driven landscape)', () => {
+  it('portrait (9:16) is height-driven, centered, with the true aspect ratio', () => {
+    const pv = previewLayout(1080, 1920);
+    expect(pv.portrait).toBe(true);
+    expect(pv.box.height).toBe('100%');
+    expect(pv.box.maxHeight).toBe('min(100%, 78vh)');
+    expect(pv.box.aspectRatio).toBe('1080 / 1920');
+    expect(pv.box.margin).toBe('0 auto');
+    expect(pv.player).toEqual({ height: '100%' });
+    expect(pv.box.width).toBeUndefined();
+  });
+  it('square counts as portrait (height >= width)', () => {
+    expect(previewLayout(1000, 1000).portrait).toBe(true);
+  });
+  it('landscape (16:9) keeps the legacy width-driven branch', () => {
+    const pv = previewLayout(1920, 1080);
+    expect(pv.portrait).toBe(false);
+    expect(pv.box.width).toBe('min(640px, 100%)');
+    expect(pv.box.height).toBeUndefined();
+    expect(pv.player).toEqual({ width: '100%' });
+  });
+  it('degenerate dims fall back to a 1080×1920 portrait (never letterboxes wrong)', () => {
+    const pv = previewLayout(0, 0);
+    expect(pv.portrait).toBe(true);
+    expect(pv.box.aspectRatio).toBe('1080 / 1920');
   });
 });
 

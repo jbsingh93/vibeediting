@@ -1,5 +1,7 @@
+import * as fs from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import { attachConsoleGuard } from './console-guard.js';
+import { MOCK_SCENARIO_PATH } from '../../playwright.config.js';
 
 /**
  * The fine-tune editor on e2e-demo (seeded captions.json) — trimmed port of the parent's P4 suite:
@@ -10,10 +12,29 @@ import { attachConsoleGuard } from './console-guard.js';
 const URL = '/#/finetune/e2e-demo';
 const PX_PER_SEC = 60; // the editor's default zoom
 
+/**
+ * VE.7.5 — the editor now fits the clip to the dock width on LOAD (auto-fit), so the default zoom
+ * is no longer a fixed 60. Pin it to PX_PER_SEC via the keyboard the moment the editor opens: the
+ * first slider touch sets `zoomTouched`, which permanently disables auto-fit — so every test's
+ * pixel↔seconds math (rb.x + sec*PX_PER_SEC) stays valid against the restructured DOM. Home jumps
+ * to the slider min (20) so we always approach the target deterministically from below.
+ */
+async function lockZoom(page: Page, target = PX_PER_SEC) {
+  const zoom = page.getByTestId('ft-zoom');
+  await zoom.focus();
+  await zoom.press('Home');
+  for (let guard = 0; guard < 320; guard++) {
+    if (Number(await zoom.inputValue()) >= target) break;
+    await zoom.press('ArrowRight');
+  }
+  expect(Number(await zoom.inputValue())).toBe(target);
+}
+
 async function openEditor(page: Page) {
   await page.goto(URL);
   await expect(page.getByTestId('finetune')).toBeVisible();
   await expect(page.getByTestId('ft-chip').first()).toBeVisible();
+  await lockZoom(page);
 }
 
 test('finetune: caption chips render from the seeded captions.json', async ({ page }) => {
@@ -22,6 +43,34 @@ test('finetune: caption chips render from the seeded captions.json', async ({ pa
 
   await expect(page.getByTestId('ft-chip')).toHaveCount(4); // AI / took / your / job
   await expect(page.locator('[data-word="job"]')).toBeVisible();
+
+  expect(guard.errors()).toEqual([]);
+});
+
+test('finetune: VE.7.5 layout — clip fits the dock width on load + the editor fills its region', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.goto(URL);
+  await expect(page.getByTestId('finetune')).toBeVisible();
+  await expect(page.getByTestId('ft-chip').first()).toBeVisible();
+  // NB: deliberately NOT lockZoom — we are asserting the auto-fit DEFAULT landed.
+
+  const dock = page.getByTestId('ft-timeline');
+  await expect(dock).toBeVisible();
+  const dockBox = await dock.boundingBox();
+  const laneBox = await dock.locator('> div').first().boundingBox(); // the (trackWidth+52) lane
+  if (!dockBox || !laneBox) throw new Error('no timeline boxes');
+
+  // fit-to-width: the track lane spans (≈) the full dock width on load, instead of a ~350px stub
+  // stranded left in a ~1200px dock (the pre-VE.7.5 "sea of black").
+  expect(laneBox.width).toBeGreaterThan(dockBox.width * 0.9);
+
+  // fill-height: the editor claims its region — the timeline dock reaches the bottom of the editor,
+  // and the editor reaches near the viewport bottom (not a natural-height cluster stranded up top).
+  const ft = await page.getByTestId('finetune').boundingBox();
+  const vp = page.viewportSize();
+  if (!ft || !vp) throw new Error('no viewport / editor box');
+  expect(ft.y + ft.height).toBeGreaterThan(vp.height - 120);
+  expect(dockBox.y + dockBox.height).toBeGreaterThan(ft.y + ft.height - 10);
 
   expect(guard.errors()).toEqual([]);
 });
@@ -71,6 +120,39 @@ async function dragJob(page: Page, dxPx: number) {
   await page.mouse.move(b.x + b.width / 2 + dxPx, b.y + b.height / 2, { steps: 6 });
   await page.mouse.up();
   return chip.boundingBox();
+}
+
+/** Drag a range on the ruler from `fromSec` to `toSec` (output time) → forms a selection band. */
+async function dragRange(page: Page, fromSec: number, toSec: number) {
+  await lockZoom(page); // pin the zoom so fromSec*PX_PER_SEC lands where we expect (VE.7.5 auto-fit)
+  const ruler = page.getByTestId('ft-ruler');
+  await ruler.scrollIntoViewIfNeeded();
+  const rb = await ruler.boundingBox();
+  if (!rb) throw new Error('no ruler box');
+  const y = rb.y + rb.height / 2;
+  await page.mouse.move(rb.x + fromSec * PX_PER_SEC, y);
+  await page.mouse.down();
+  await page.mouse.move(rb.x + ((fromSec + toSec) / 2) * PX_PER_SEC, y, { steps: 6 });
+  await page.mouse.move(rb.x + toSec * PX_PER_SEC, y, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.getByTestId('ft-range-window')).toBeVisible();
+}
+
+/**
+ * Drive an <input type=range> to `target` via the keyboard (ArrowLeft/Right = ∓step). Stays in the
+ * DOM-typed browser out of the Node typecheck, and exercises the real control: the range-audio gain
+ * slider splits the clip on the first step, then re-sets the inner clip's gain on each subsequent
+ * step (the lane-stable key keeps focus across the split).
+ */
+async function nudgeRange(page: Page, testid: string, target: number) {
+  const slider = page.getByTestId(testid).first();
+  await slider.focus();
+  for (let guard = 0; guard < 80; guard++) {
+    const cur = Number(await slider.inputValue());
+    if (cur === target) break;
+    await page.keyboard.press(cur > target ? 'ArrowLeft' : 'ArrowRight');
+  }
+  expect(Number(await slider.inputValue())).toBe(target);
 }
 
 test('finetune: undo/redo chain across 3 edits, then reset-to-Whisper baseline', async ({ page }) => {
@@ -169,6 +251,7 @@ test('finetune: structural verbs — split @ playhead → delete → reorder →
 
   // the seeded 3-segment EDL renders on the SEG track
   await expect(page.getByTestId('ft-segment')).toHaveCount(3);
+  await lockZoom(page); // VE.7.5 auto-fit → pin to 60 px/s before the ruler pixel math
 
   // razor: seek the playhead into s2 (1.5s @ 60px/s = +90px on the ruler), then press S to split
   const ruler = page.getByTestId('ft-ruler');
@@ -313,6 +396,158 @@ test('finetune: per-clip effects — add color/transform/speed on a clip → sav
   // other clips stay un-effected (no injected defaults)
   const s2 = seg.data.segments.find((s: { id: string }) => s.id === 's2');
   expect(s2.effects).toBeUndefined();
+
+  expect(guard.errors()).toEqual([]);
+});
+
+test('finetune: range audio — dip music in a window splits the BGM track into clips → save persists', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  await page.goto('/#/finetune/e2e-edl-audio');
+  await expect(page.getByTestId('finetune')).toBeVisible();
+  await expect(page.getByTestId('ft-segment')).toHaveCount(3);
+  await expect(page.getByTestId('ft-audio-pill')).toHaveCount(1); // one to-end BGM bed
+
+  // select a 0.5–2.5s window → the range-audio panel lists the spanned BGM clip + the footage row
+  await dragRange(page, 0.5, 2.5);
+  await expect(page.getByTestId('ft-range-audio')).toBeVisible();
+  await expect(page.getByTestId('ft-range-audio-clip')).toHaveCount(1);
+  await expect(page.getByTestId('ft-range-footage')).toBeVisible();
+
+  // dip the music to −30 dB inside the window → the BGM track splits into head / dipped-mid / tail
+  await nudgeRange(page, 'ft-range-audio-gain', -30);
+  await expect(page.getByTestId('ft-audio-pill')).toHaveCount(3);
+
+  await page.getByTestId('ft-save').click();
+  await expect(page.getByTestId('ft-save-status')).toContainText('saved audio-mix.json');
+  await page.reload();
+
+  const state = await (await page.request.get('/api/projects/e2e-edl-audio/finetune')).json();
+  const mix = state.docs.find((d: { name: string }) => d.name === 'audio-mix.json');
+  const tracks = mix.data.tracks as { offsetSec: number; durationSec?: number; srcInSec?: number; gainDb: number }[];
+  expect(tracks).toHaveLength(3);
+  const byOffset = [...tracks].sort((a, b) => a.offsetSec - b.offsetSec);
+  expect(byOffset[0]).toMatchObject({ offsetSec: 0, durationSec: 0.5, gainDb: -12 }); // head untouched
+  expect(byOffset[1]).toMatchObject({ offsetSec: 0.5, durationSec: 2, gainDb: -30 }); // the dip
+  expect(byOffset[2]).toMatchObject({ offsetSec: 2.5, gainDb: -12 }); // tail untouched
+  expect(byOffset[2]!.srcInSec).toBe(2.5); // source stays continuous across the dip (no drift)
+  expect(mix.data.masterLufs).toBe(-14); // master loudness lock untouched
+
+  expect(guard.errors()).toEqual([]);
+});
+
+test('finetune: range audio — mute footage in a window + insert an SFX at the range start → save persists', async ({ page }) => {
+  const guard = attachConsoleGuard(page);
+  // own seeded project — Test A's save mutates e2e-edl-audio on disk, so this one stays hermetic.
+  await page.goto('/#/finetune/e2e-edl-audio2');
+  await expect(page.getByTestId('finetune')).toBeVisible();
+  await expect(page.getByTestId('ft-segment')).toHaveCount(3);
+
+  await dragRange(page, 0.5, 2.5);
+
+  // mute the footage audio of the spanned segments (video keeps playing)
+  await page.getByTestId('ft-range-footage-mute').click();
+  // insert an SFX track AT the range start (VE.7.2)
+  await page.getByTestId('ft-range-insert-sfx').selectOption('e2e-edl-audio2/sfx-whoosh.mp3');
+  await expect(page.getByTestId('ft-audio-pill')).toHaveCount(2); // bed + the new SFX
+
+  await page.getByTestId('ft-save').click();
+  await expect(page.getByTestId('ft-save-status')).toContainText('saved');
+  await page.reload();
+
+  const state = await (await page.request.get('/api/projects/e2e-edl-audio2/finetune')).json();
+  const seg = state.docs.find((d: { name: string }) => d.name === 'segments.json');
+  // all three spanned segments carry footage mute; nothing else changed
+  expect(seg.data.segments.map((s: { audioMute?: boolean }) => !!s.audioMute)).toEqual([true, true, true]);
+  const mix = state.docs.find((d: { name: string }) => d.name === 'audio-mix.json');
+  const sfx = mix.data.tracks.find((t: { role: string }) => t.role === 'sfx');
+  expect(sfx).toBeTruthy();
+  expect(sfx.offsetSec).toBeCloseTo(0.5, 1); // dropped at the range start
+  expect(sfx.src).toBe('e2e-edl-audio2/sfx-whoosh.mp3');
+
+  expect(guard.errors()).toEqual([]);
+});
+
+test('finetune: Ask Editor Agent — range prefills the composer → agent rewrites the window → diff card → accept persists', async ({ page }) => {
+  test.setTimeout(60_000);
+  const guard = attachConsoleGuard(page);
+
+  // the project workspace (NOT the standalone #/finetune route) — the chat composer lives here, so
+  // the "Ask Editor Agent" affordance renders and the turn can run.
+  await page.goto('/#/project/e2e-edl-agent');
+  await expect(page.getByTestId('agent-input')).toBeVisible();
+  await page.locator('[data-editor-tab="finetune"]').click();
+  await expect(page.getByTestId('finetune')).toBeVisible();
+  await expect(page.getByTestId('ft-segment')).toHaveCount(3);
+
+  // drag a time range on the ruler → the range inspector + the Ask-Editor-Agent affordance appear.
+  // (In the project workspace the editor shares vertical space with the player, so bring the ruler
+  // into view before dragging — its box can otherwise sit below the fold.)
+  const ruler = page.getByTestId('ft-ruler');
+  await ruler.scrollIntoViewIfNeeded();
+  const rb = await ruler.boundingBox();
+  if (!rb) throw new Error('no ruler box');
+  const y = rb.y + rb.height / 2;
+  await page.mouse.move(rb.x + 8, y);
+  await page.mouse.down();
+  await page.mouse.move(rb.x + rb.width * 0.5, y, { steps: 8 });
+  await page.mouse.move(rb.x + rb.width - 8, y, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.getByTestId('ft-range-window')).toBeVisible();
+  await expect(page.getByTestId('ft-range-ask-agent')).toBeVisible();
+
+  // the agent's scoped turn drops the filler middle clip, leaving s1/s3 byte-identical (window-only).
+  fs.writeFileSync(
+    MOCK_SCENARIO_PATH,
+    JSON.stringify({
+      reply: 'Tightened the window — dropped the filler clip; s1 and s3 are unchanged.',
+      docs: [
+        {
+          name: 'segments.json',
+          data: {
+            fps: 30,
+            crossfadeFrames: 0,
+            src: 'e2e-edl-agent/clip.mp4',
+            segments: [
+              { id: 's1', srcStart: 0, srcEnd: 1, cap: '' },
+              { id: 's3', srcStart: 2, srcEnd: 3, cap: '' },
+            ],
+          },
+        },
+      ],
+    }),
+  );
+
+  try {
+    // VE.6.1 — clicking the affordance prefills the SHARED composer with the visible scope prefix.
+    await page.getByTestId('ft-range-ask-agent').click();
+    const input = page.getByTestId('agent-input');
+    await expect(input).toHaveValue(/^\[Editing range \d+:\d{2}–\d+:\d{2} · affects segments\.json\] $/);
+
+    // type the instruction AFTER the prefix and send a normal turn (Enter).
+    await input.click();
+    await input.press('End');
+    await input.pressSequentially('tighten this — drop the filler clip');
+    await input.press('Enter');
+
+    // the agent's reply streams in…
+    await expect(page.getByTestId('agent-feed')).toContainText('Tightened the window', { timeout: 20_000 });
+
+    // …and the 2.5s disk-diff poll surfaces the scoped change as the accept/reject card.
+    await expect(page.getByTestId('ft-agent-diff')).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId('ft-diff-accept').click();
+    await expect(page.getByTestId('ft-agent-diff')).toHaveCount(0);
+  } finally {
+    fs.rmSync(MOCK_SCENARIO_PATH, { force: true });
+  }
+
+  // persisted: the window was tightened (s2 gone) and the out-of-window clips are preserved verbatim.
+  const state = await (await page.request.get('/api/projects/e2e-edl-agent/finetune')).json();
+  const seg = state.docs.find((d: { name: string }) => d.name === 'segments.json');
+  expect(seg.data.segments.map((s: { id: string }) => s.id)).toEqual(['s1', 's3']);
+  const s1 = seg.data.segments.find((s: { id: string }) => s.id === 's1');
+  const s3 = seg.data.segments.find((s: { id: string }) => s.id === 's3');
+  expect({ a: s1.srcStart, b: s1.srcEnd }).toEqual({ a: 0, b: 1 });
+  expect({ a: s3.srcStart, b: s3.srcEnd }).toEqual({ a: 2, b: 3 });
 
   expect(guard.errors()).toEqual([]);
 });

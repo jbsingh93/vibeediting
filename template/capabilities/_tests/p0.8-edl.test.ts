@@ -1,5 +1,5 @@
 import { test, assert, assertEqual, assertThrows } from './harness';
-import { parseSegments, segmentsDocSchema, edlSegmentSchema, transitionSchema, effectSchema, effectsPresentation } from '../../src/components/edl';
+import { parseSegments, segmentsDocSchema, edlSegmentSchema, transitionSchema, effectSchema, effectsPresentation, footageGain, gainDbToAmplitude } from '../../src/components/edl';
 
 // A pre-VE segments.json: the original shape, no transition/effects. The backward-compat anchor.
 const LEGACY_DOC = {
@@ -81,6 +81,23 @@ test('P0.8 effectsPresentation (VE.5.2): the launch effect set renders to CSS + 
   assertEqual(p.playbackRate, 1.5, 'speed → playbackRate');
   // lut is reserved (VE.5.6) → a no-op at launch
   assertEqual(JSON.stringify(effectsPresentation([{ type: 'lut', src: 'luts/x.cube' }])), JSON.stringify({ style: {}, playbackRate: 1 }), 'lut must be a launch no-op');
+});
+
+test('P0.8 footageGain (VE.7.1 / D34): absent ⇒ ×1, dB scales, mute ⇒ 0 (over the fade envelope)', () => {
+  assertEqual(footageGain({}), 1, 'absent footage fields must be a ×1 no-op');
+  assertEqual(footageGain({ audioGainDb: 0 }), 1, '0 dB ⇒ ×1');
+  assert(Math.abs(footageGain({ audioGainDb: -6 }) - gainDbToAmplitude(-6)) < 1e-9, 'dB → amplitude');
+  assertEqual(footageGain({ audioMute: true }), 0, 'mute ⇒ 0');
+  assertEqual(footageGain({ audioGainDb: 6, audioMute: true }), 0, 'mute wins over gain');
+});
+
+test('P0.8 a segment + audio clip carrying the D34 fields validates; legacy round-trips identically', () => {
+  const seg = { id: 's1', srcStart: 0, srcEnd: 2, audioGainDb: -9, audioMute: true };
+  assert(edlSegmentSchema.safeParse(seg).success, 'segment with footage audio must validate');
+  assert(!edlSegmentSchema.safeParse({ id: 's1', srcStart: 0, srcEnd: 2, audioGainDb: 99 }).success, 'gain > 12 must reject');
+  // a legacy doc carries no footage fields and round-trips byte-identically (re-asserts backward-compat)
+  const doc = parseSegments(LEGACY_DOC);
+  assert(doc.segments[0].audioGainDb === undefined, 'legacy segment must have no footage gain');
 });
 
 test('P0.8 segmentsDocSchema + edlSegmentSchema are exported and consistent', () => {

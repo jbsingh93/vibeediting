@@ -74,6 +74,10 @@ export const edlSegmentSchema = z.object({
   cap: z.string().optional(),
   transition: transitionSchema.optional(),
   effects: z.array(effectSchema).optional(),
+  /** D34: this clip's OWN (footage) audio level in dB over the auto fade. Absent ⇒ 0 dB (×1). */
+  audioGainDb: z.number().min(-36).max(12).optional(),
+  /** D34: silence this clip's footage audio (video keeps playing). Absent/false ⇒ audible. */
+  audioMute: z.boolean().optional(),
 });
 export type EdlSegment = z.infer<typeof edlSegmentSchema>;
 
@@ -134,6 +138,10 @@ export interface AudioTrack {
   offsetSec: number;
   gainDb: number;
   duck?: { depth: number };
+  /** D34: source in-point (sec) for a split clip. Absent ⇒ 0 (plays from the file head). */
+  srcInSec?: number;
+  /** D34: output length (sec) of this clip. Absent ⇒ plays to the end of the timeline (legacy). */
+  durationSec?: number;
 }
 
 export interface PlacedEdlSegment extends EdlSegment {
@@ -310,6 +318,16 @@ export function remapEdlCaptions(
 
 export function gainDbToAmplitude(gainDb: number): number {
   return Math.pow(10, gainDb / 20);
+}
+
+/**
+ * A clip's FOOTAGE (own) audio multiplier (D34) — applied on top of the OffthreadVideo fade
+ * envelope. `audioMute` ⇒ 0 (silent, video plays on); else `audioGainDb` in dB (absent ⇒ ×1, so a
+ * legacy segment renders unchanged). A VERBATIM MIRROR of `footageGain` in `ui-app/src/lib/finetune.ts`.
+ */
+export function footageGain(seg: { audioGainDb?: number; audioMute?: boolean }): number {
+  if (seg.audioMute) return 0;
+  return seg.audioGainDb == null ? 1 : gainDbToAmplitude(seg.audioGainDb);
 }
 
 export function voWindows(words: { startMs: number; endMs: number }[]): [number, number][] {

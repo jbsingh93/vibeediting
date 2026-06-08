@@ -4,6 +4,8 @@ import {
   segmentsDocSchema,
   transitionSchema,
   effectSchema,
+  audioMixSchema,
+  audioTrackSchema,
   validateFinetuneFile,
   classifyFinetuneDoc,
 } from '../../src/server/p4-routes.js';
@@ -81,5 +83,45 @@ describe('p4 EDL schema mirror — transition/effects', () => {
     expect(segmentSchema.safeParse({ id: 's1', srcStart: 0, srcEnd: 1, effects: [{ type: 'opacity', value: 0.5 }] }).success).toBe(
       true,
     );
+  });
+});
+
+// ── VE.7 / D34 — footage audio + split audio clips ───────────────────────────────
+
+describe('p4 schema mirror — D34 footage audio + audio-mix clips', () => {
+  it('segment accepts footage audioGainDb/audioMute; clamps gain; rejects bad types', () => {
+    expect(segmentSchema.safeParse({ id: 's1', srcStart: 0, srcEnd: 2, audioGainDb: -9, audioMute: true }).success).toBe(true);
+    expect(segmentSchema.safeParse({ id: 's1', srcStart: 0, srcEnd: 2, audioGainDb: 99 }).success).toBe(false); // >12
+    expect(segmentSchema.safeParse({ id: 's1', srcStart: 0, srcEnd: 2, audioMute: 'yes' }).success).toBe(false);
+  });
+
+  it('a pre-VE segments.json stays valid (footage fields absent ⇒ no-op)', () => {
+    const parsed = segmentsDocSchema.safeParse(LEGACY_DOC);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.segments[0]).not.toHaveProperty('audioGainDb');
+  });
+
+  it('audio-mix track accepts srcInSec/durationSec (split clip); legacy track still valid', () => {
+    const legacy = { id: 'bgm-1', role: 'bgm', src: 'p/bgm.mp3', offsetSec: 0, gainDb: -12 };
+    expect(audioTrackSchema.safeParse(legacy).success).toBe(true);
+    const clip = { ...legacy, id: 'bgm-1-b', offsetSec: 5, srcInSec: 5, durationSec: 5 };
+    expect(audioTrackSchema.safeParse(clip).success).toBe(true);
+    expect(audioTrackSchema.safeParse({ ...clip, durationSec: 0 }).success).toBe(false); // must be positive
+    expect(audioTrackSchema.safeParse({ ...clip, srcInSec: -1 }).success).toBe(false); // ≥ 0
+  });
+
+  it('a full split-clip audio-mix doc validates + classifies as audio-mix; master stays −14', () => {
+    const doc = {
+      masterLufs: -14,
+      tracks: [
+        { id: 'bgm-1', role: 'bgm', src: 'p/bgm.mp3', offsetSec: 0, gainDb: -12, durationSec: 5 },
+        { id: 'bgm-1-b', role: 'bgm', src: 'p/bgm.mp3', offsetSec: 5, srcInSec: 5, gainDb: -30, durationSec: 5 },
+        { id: 'bgm-1-c', role: 'bgm', src: 'p/bgm.mp3', offsetSec: 10, srcInSec: 10, gainDb: -12 },
+      ],
+    };
+    expect(audioMixSchema.safeParse(doc).success).toBe(true);
+    expect(validateFinetuneFile('audio-mix.json', doc)).toBeNull();
+    expect(classifyFinetuneDoc('audio-mix.json', doc)).toBe('audio-mix');
+    expect(audioMixSchema.safeParse({ ...doc, masterLufs: -16 }).success).toBe(false); // locked literal
   });
 });
