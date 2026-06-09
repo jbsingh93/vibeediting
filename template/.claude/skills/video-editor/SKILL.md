@@ -2,7 +2,7 @@
 name: video-editor
 description: Build, preview, and render Remotion videos in this JBS Vibe Editing project — short paid ads (9:16, 15-60s), long-form tutorials (16:9, 5-30min), real-footage edits with motion-graphic overlays, talking-head with kinetic captions, animated explainers, screencasts, testimonial cards, data viz. Use when the user asks to make a video, ad, reel, short, TikTok, YouTube video, tutorial, screencast, demo, explainer, or wants to render/edit/caption with Remotion.
 when_to_use: Trigger on "make a video", "build an ad", "edit this footage", "add captions", "render the composition", "9:16", "16:9", "Hormozi style", "MKBHD style", "vertical", "reel", "short", "tutorial", "screencast", "explainer", "testimonial", "lower third" — in any language the user writes in.
-allowed-tools: Read Write Edit Bash(npx remotion *) Bash(npm run *) Bash(npm exec remotion *) Bash(ffprobe *) Bash(ffmpeg *) Bash(node *) Bash(tsx *) Bash(npx tsx *)
+allowed-tools: Read Write Edit WebSearch WebFetch Bash(npx remotion *) Bash(npm run *) Bash(npm exec remotion *) Bash(ffprobe *) Bash(ffmpeg *) Bash(node *) Bash(tsx *) Bash(npx tsx *)
 ---
 
 <!-- VIBE:GENERATED {{VIBE_VERSION}} — edit freely; `vibe upgrade` never overwrites files you change. -->
@@ -43,7 +43,15 @@ Read this entire SKILL.md before doing anything else. Then route to the correct 
 15. **Background renders — interactive sessions ONLY.** In a normal Claude Code session, use `run_in_background: true` for any render >30s and keep iterating. **In cockpit mode (headless turns driven from `vibe ui`) backgrounded processes DIE the moment your turn ends** — run renders in the FOREGROUND and keep the turn open until the file lands; the human watches progress via your recorded stages, not your shell.
 16. **Tone filter.** Copy follows `brand/brand.json` → `tone.sellStyle`: `soft` bans "BUY NOW"/"AMAZING"/pressure tactics; `neutral` allows clear CTAs; `direct` allows urgency, still honest. Evidence-led, specific outcomes win at every setting.
 17. **Captions never in bottom 480 px** of 9:16 (platform UI overlap). Use `<SafeZone platform="...">` from `src/components`.
-18. **Eyes, not just ears.** Whisper only hears audio. On any video with real footage/B-roll, run `tsx capabilities/perception/gemini-video-review.ts <file> --mode describe` during ingest (add `--granularity second --transcript <captions.json>` for a Whisper-anchored per-second map) so you plan against what's actually on screen. Before delivering ANY final render, run `--mode qa` on the loudnorm'd file, AND run `tsx capabilities/perception/cut-doctor.ts` for frame-accurate cut surgery (catches mid-sentence / cut-before-payoff that Gemini alone rationalizes away). Treat `blocker`/`major` QA issues and flagged cuts as a gate (fix + re-render). See [references/video-review-gemini.md](references/video-review-gemini.md). Gemini understands; Whisper (via cut-doctor) gives the exact frame.
+18. **The specialist panel + the editing protocol — ALWAYS, both ends.** Whisper only hears audio; the panel gives the editor expert EYES, and the [editing-protocol.md](references/editing-protocol.md) is the numbered bar everything is graded against.
+    - **Conceptualize at ingest (mandatory when source footage exists):** run `tsx capabilities/perception/perception-council.ts --in <720p-proxy> --transcript <captions.json> --context "<aspect, platform, lang, style, goal>"`. A fan-out panel of world-class specialists (sound · cut · broll-concept · story · composition · color · detail · performance) writes `<prefix>.conceptualization.md` — the spine, the **concept-visual beats** (the teach-test: a visual must teach what the words don't), b-roll opportunities, cut/cover map, and emphasis words. **Build the PLAN from this**, not from the transcript alone.
+    - **Judge at delivery (mandatory gate):** `tsx capabilities/orchestrate/verify.ts --in <render> --eyes --plan <plan-file> --transcript <captions.json> --context "<intent>"` runs the JUDGE panel + objective meters and grades the render rule-by-rule against the protocol. Also run `tsx capabilities/perception/cut-doctor.ts` for the frame-accurate cut (catches mid-word / cut-before-payoff Gemini rationalizes away). **Treat any `blocker`/`major`/failed-meter as a hard gate** (fix + re-render). Objective meters always win over a lenient "looks great". See [references/video-review-gemini.md](references/video-review-gemini.md).
+
+19. **Render rounds — 720p preview FIRST, full render only on approval.** Never jump straight to loudnorm + final (that is three slow renders the user waits minutes for on every tweak). Instead:
+    1. **Preview:** render `--preset preview-720p` (downscaled half-res `--scale=0.5`, speed-biased — **tell the user explicitly this is a fast preview, not final quality**). One quick render.
+    2. **Gate:** the user reviews in the cockpit Player and either **approves** or **requests edits**. In cockpit mode this is a plan/preview gate — do not proceed past it on your own.
+    3. **Edit loop:** if they request edits, apply them and re-render **only `preview-720p`** again. Repeat until approved — the user never waits on a full render to see a change.
+    4. **Finalize (only on approval):** render the real full-resolution preset → `loudnorm.ts` (−14 LUFS) → the delivery QA gate (rule 18). Loudnorm + final + QA happen **once**, at the end, on the approved cut.
 
 ---
 
@@ -102,17 +110,27 @@ Three capability CLIs generate audio on the fly, straight into the Remotion pipe
 
 ---
 
+## Conceptualize & research FIRST (the plan is only as good as this)
+
+Before planning an edit — especially of real footage — two steps make the plan dramatically more potent, nuanced, and specialized. Do BOTH before proposing the scene table:
+
+1. **Run the Conceptualize panel** (hard rule 18): `perception-council.ts` on the 720p proxy + transcript. Read `<prefix>.conceptualization.md` — its spine, **concept-visual beats**, b-roll opportunities, cut/cover map, and emphasis words ARE the raw material of the plan. For every explanation beat it flags, honor the **teach-test**: the visual must let the viewer understand something the words alone don't — a *mechanism*, a *relationship*, a *structure*, a *before→after*. A styled quote that restates the sentence is a text card, not a concept visual; reach for the explanatory visual (flow / network / contrast / structure / metaphor build) instead. (Doctrine: the concept-visualization lens in the `broll-concept` specialist + [editing-protocol.md](references/editing-protocol.md) lane V.)
+
+2. **Do EXTENSIVE web research for the user's specific wish.** The conceptualization gives generic craft; the user's video is specific. Before finalizing the plan, use `WebSearch`/`WebFetch` to research — for THIS video's exact topic, format, audience, platform, and goal — across ALL parts of conceptualizing: how the best creators in this niche build the hook and pace the first 30s; what concrete visual metaphors / diagrams actually explain the specific concepts being discussed; reference videos, current platform trends, and proven structures; and real product UIs / screenshots / logos for anything named (real > stock > generated). Research widely and specifically, then weave the findings into each beat's `reason`. The goal is a plan grounded in how *this exact kind of video* is made world-class — never a generic template.
+
+Then propose the plan, built on the conceptualization + the research.
+
 ## Workflow
 
-1. **Plan mode.** Propose numbered scene table. Wait for approval (cockpit: plan in `manifest.notes`, plan gate).
+1. **Plan mode.** **First, Conceptualize & research (above)** when source footage exists. Then propose a numbered scene table built on it. Wait for approval (cockpit: plan in `manifest.notes`, plan gate).
 2. **Scaffold.** Run `vibe new-comp <Name> --duration <frames> --width <w> --height <h> --fps <fps>` to create files + register in Root.tsx.
 3. **Generate scene-by-scene.** After each scene, render frame 30 with `npx remotion still <Id> out/check-<scene>-30.png --frame=30 --scale=0.25` (cheap visual check).
 4. **Storyboard checkpoint.** Render PNGs at 0%, 10%, 25%, 50%, 75%, 90%, 100%. Check for overflow / safe-zone violations.
 5. **Preview.** The user scrubs in the cockpit Player (`vibe ui`). Ask which scenes need refinement.
 6. **Refine.** Accept frame-accurate change requests. Re-render only changed scenes.
-7. **Final render.** `tsx capabilities/deliver/render-preset.ts --preset <preset> --comp <Id> --out <project>/<name> --project <project>` — the `--out` name MUST be project-scoped (`out/<project>/…`) or the cockpit Preview tab can't attribute it (root strays show only as "unscoped"). Background in interactive sessions; FOREGROUND in cockpit turns (rule 15).
-8. **Loudnorm post.** `tsx capabilities/deliver/loudnorm.ts --in out/<project>/<name>.mp4 --project <project>`.
-9. **Visual QA gate.** `tsx capabilities/perception/gemini-video-review.ts out/<file>-loudnorm.mp4 --mode qa --context "<aspect, platform, lang, style, duration>"` AND `tsx capabilities/perception/cut-doctor.ts out/<file>-loudnorm.mp4 --out out/cuts/<file>`. Read both reports; fix every `blocker`/`major` issue and every flagged cut, then re-render before delivery. (The full split gate: `tsx capabilities/orchestrate/verify.ts --in <file> --eyes` — objective meters are authoritative.)
+7. **Preview render (FAST half-res — rule 19).** `tsx capabilities/deliver/render-preset.ts --preset preview-720p --comp <Id> --out <project>/<name>-preview --project <project>`. **Tell the user plainly: this is a fast, downscaled preview (half-res, `--scale=0.5`), not final quality** — it exists so they can give edits in seconds, not after a multi-minute final render. Background in interactive sessions; FOREGROUND in cockpit turns (rule 15). `--out` MUST be project-scoped.
+8. **Approval gate (rule 19).** User reviews the `*-preview.mp4` in the cockpit Player and either approves or requests edits. On edits → apply, re-render **only `preview-720p`**, repeat. Do NOT proceed to loudnorm/final until the user explicitly approves.
+9. **Finalize — only on approval.** Full render `--preset <delivery-preset> --out <project>/<name>` → loudnorm `tsx capabilities/deliver/loudnorm.ts --in out/<project>/<name>.mp4 --project <project>` → delivery QA gate (rule 18): `tsx capabilities/orchestrate/verify.ts --in out/<project>/<name>-loudnorm.mp4 --eyes --plan <plan-file> --transcript <captions.json> --context "<aspect, platform, lang, style, duration>"` AND `tsx capabilities/perception/cut-doctor.ts out/<project>/<name>-loudnorm.mp4 --out out/cuts/<name>`. Fix every `blocker`/`major`/failed-meter + flagged cut, then re-render. The full render + loudnorm + QA happen ONCE, on the approved cut.
 10. **Template loop.** Ask the user: "Want to save this as a template? It'll show up as a style in the wizard." (If yes → `.claude/skills/template-distiller/SKILL.md`.)
 
 ---
@@ -139,7 +157,8 @@ Three capability CLIs generate audio on the fly, straight into the Remotion pipe
 - Asset conventions: [references/asset-conventions.md](references/asset-conventions.md)
 - Common bugs & fixes: [references/known-bugs-and-fixes.md](references/known-bugs-and-fixes.md)
 - Captions pipeline (Whisper): [references/captions.md](references/captions.md)
-- Video review — Gemini eyes (visual+audio timeline + edit QA): [references/video-review-gemini.md](references/video-review-gemini.md)
+- **Editing protocol — the numbered craft standard (A1–B5, thresholds + verifier tags); the bar the panel grades against and you plan to:** [references/editing-protocol.md](references/editing-protocol.md)
+- Video review — Gemini eyes + the specialist panel (Conceptualize on ingest, JUDGE on delivery): [references/video-review-gemini.md](references/video-review-gemini.md)
 - Audio mixing & loudnorm: [references/audio-mixing.md](references/audio-mixing.md)
 - Generative audio — ElevenLabs music/SFX/TTS: [references/elevenlabs-audio.md](references/elevenlabs-audio.md)
 - ElevenLabs v3 TTS — full audio-tags + voice-direction guide (use `--v3` for tags): [references/elevenlabs-tts-v3-guide.md](references/elevenlabs-tts-v3-guide.md)

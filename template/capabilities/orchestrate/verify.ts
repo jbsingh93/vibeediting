@@ -61,16 +61,24 @@ export interface VerifyResult {
   eyes: CouncilSummary | null;
 }
 
-/** Which capability stage a council specialist's blockers route back to, and whether the lens is pure taste. */
+/**
+ * Which capability stage a council specialist's blockers route back to, and whether the lens is pure
+ * taste. Keys are the SSOT registry ids (capabilities/perception/specialists.ts). Technical lenses →
+ * auto-route to a fix stage; taste lenses (no objective proxy) → escalate-to-human.
+ */
 const SPECIALIST_STAGE: Record<string, { stage: StageName; taste: boolean }> = {
-  detail: { stage: 'motion', taste: false },
-  transition: { stage: 'assemble', taste: true },
-  story: { stage: 'motion', taste: true },
-  brand: { stage: 'motion', taste: false },
+  sound: { stage: 'audio', taste: false },
+  cut: { stage: 'assemble', taste: true },
+  'broll-concept': { stage: 'motion', taste: true },
+  story: { stage: 'assemble', taste: true },
   composition: { stage: 'motion', taste: false },
-  avsync: { stage: 'audio', taste: false },
   color: { stage: 'color', taste: false },
+  detail: { stage: 'motion', taste: false },
+  performance: { stage: 'assemble', taste: true },
+  typography: { stage: 'motion', taste: false },
+  brand: { stage: 'motion', taste: false },
   screencast: { stage: 'screen-record', taste: false },
+  'reel-segment': { stage: 'assemble', taste: true },
 };
 
 // ── the decision table (pure → unit-testable offline, GAP-36) ───────────────────

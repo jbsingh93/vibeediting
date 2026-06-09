@@ -3,14 +3,19 @@
  * honest to verify.ts `decide()`:
  *   - objective meters are AUTHORITATIVE → any failed blocker meter disables Ship, no override path;
  *   - council technical-lens blockers → fix (Ship disabled);
- *   - taste-only blockers (transition/story) → escalate: "your call" + Override-with-logged-reason;
+ *   - taste-only blockers (cut/broll-concept/story/performance/reel-segment) → escalate: "your call" + Override-with-logged-reason;
  *   - ship → Ship enabled. eyes === null → "taste UNVERIFIED" warning chip.
  * Unit-tested against one fixture per decide() branch (§6T.1).
  */
 import type { VerifyResult, Verdict } from './types';
 
-/** Mirrors verify.ts SPECIALIST_STAGE taste flags (transition/story are the taste lenses). */
-const TASTE_LENSES = new Set(['transition', 'story']);
+/**
+ * Mirrors verify.ts SPECIALIST_STAGE `taste` flags — the lenses with no objective meter, so a blocker
+ * escalates to a human "your call" instead of auto-routing to a fix stage. Keep in lockstep with the
+ * 10-specialist registry (specialists.ts) + verify.ts: cut · broll-concept · story · performance, plus
+ * the reel-segment sub-lens.
+ */
+const TASTE_LENSES = new Set(['cut', 'broll-concept', 'story', 'performance', 'reel-segment']);
 
 export interface QaView {
   verdict: Verdict;

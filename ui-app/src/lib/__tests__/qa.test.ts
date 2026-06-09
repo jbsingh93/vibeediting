@@ -21,7 +21,7 @@ const council = (specialists: { id: string; blockers: number }[]): CouncilSummar
 
 const CLEAN_EYES = council([
   { id: 'detail', blockers: 0 },
-  { id: 'transition', blockers: 0 },
+  { id: 'cut', blockers: 0 },
   { id: 'story', blockers: 0 },
 ]);
 
@@ -70,7 +70,7 @@ describe('qaView over decide() branches', () => {
   });
 
   it('escalate (taste-only blocker) — your call: Ship disabled UNTIL overridden', () => {
-    const r = decide([okCheck('loudness')], council([{ id: 'transition', blockers: 1 }, { id: 'detail', blockers: 0 }]));
+    const r = decide([okCheck('loudness')], council([{ id: 'cut', blockers: 1 }, { id: 'detail', blockers: 0 }]));
     expect(r.verdict).toBe('escalate');
     const v = qaView(r);
     expect(v.shipEnabled).toBe(false);
@@ -97,9 +97,8 @@ describe('qaView over decide() branches', () => {
 });
 
 describe('taste lenses', () => {
-  it('matches verify.ts (transition/story are taste; the rest technical)', () => {
-    expect(isTasteLens('transition')).toBe(true);
-    expect(isTasteLens('story')).toBe(true);
-    for (const t of ['detail', 'brand', 'composition', 'avsync', 'color', 'screencast']) expect(isTasteLens(t)).toBe(false);
+  it('matches verify.ts SPECIALIST_STAGE (cut/broll-concept/story/performance + reel-segment are taste; the rest technical)', () => {
+    for (const t of ['cut', 'broll-concept', 'story', 'performance', 'reel-segment']) expect(isTasteLens(t)).toBe(true);
+    for (const t of ['sound', 'composition', 'color', 'detail', 'typography', 'brand', 'screencast']) expect(isTasteLens(t)).toBe(false);
   });
 });

@@ -8,7 +8,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { FileState, GoogleGenAI, MediaResolution } from '@google/genai';
+import { FileState, GoogleGenAI, MediaResolution, ThinkingLevel } from '@google/genai';
 import { loadDotEnv, modelId } from '../_env/contract';
 
 export function geminiApiKey(): string {
@@ -65,6 +65,16 @@ export function resolutionEnum(r: 'low' | 'default' | 'high'): MediaResolution |
   return undefined;
 }
 
+export function thinkingEnum(t: 'minimal' | 'low' | 'medium' | 'high' | undefined): ThinkingLevel | undefined {
+  switch (t) {
+    case 'minimal': return ThinkingLevel.MINIMAL;
+    case 'low': return ThinkingLevel.LOW;
+    case 'medium': return ThinkingLevel.MEDIUM;
+    case 'high': return ThinkingLevel.HIGH;
+    default: return undefined;
+  }
+}
+
 /** Best-effort JSON parse — strips ``` fences / surrounding prose. */
 export function parseJsonLoose(text: string): unknown {
   const t = text.trim();
@@ -92,12 +102,15 @@ export async function askJson(
   model: string,
   file: UploadedFile,
   prompt: string,
-  opts: { fps?: number; resolution?: 'low' | 'default' | 'high' } = {},
+  opts: { fps?: number; resolution?: 'low' | 'default' | 'high'; thinking?: 'minimal' | 'low' | 'medium' | 'high' } = {},
 ): Promise<unknown> {
   const videoMetadata: Record<string, unknown> = { fps: opts.fps ?? 2 };
+  // Temperature is left at the Gemini-3 default (1.0) — lowering it risks looping/degraded reasoning.
   const config: Record<string, unknown> = { responseMimeType: 'application/json' };
   const mr = resolutionEnum(opts.resolution ?? 'default');
   if (mr) config.mediaResolution = mr;
+  const tl = thinkingEnum(opts.thinking);
+  if (tl) config.thinkingConfig = { thinkingLevel: tl };
   const response = await ai.models.generateContent({
     model,
     contents: [{ role: 'user', parts: [{ fileData: { fileUri: file.uri, mimeType: file.mimeType }, videoMetadata }, { text: prompt }] }],

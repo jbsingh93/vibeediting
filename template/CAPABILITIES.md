@@ -128,13 +128,19 @@ at first failure, writes each step to `out/work/<project>/<stage>/NN-<name>.<ext
 | File | Purpose | Invoke | Output |
 |---|---|---|---|
 | `gemini-client.ts` | Shared Files-API helper (upload **once**, reuse across prompts) | library | `uploadAndWait`, `askJson`, `visualCortexModel`, `parseJsonLoose` |
-| `gemini-council.ts` | **7-specialist panel** (each must cite `MM:SS.s` + frame-region; bare "looks great" rejected) | `tsx capabilities/perception/gemini-council.ts --in V [--context "..."] [--fps 3] [--resolution high] [--only detail,transition] [--screencast] [--lang en\|da]` | `${PREFIX}.json` with `aggregateVerdict ship\|fix\|incomplete` |
+| `specialists.ts` | **Panel registry (SSOT)** — 10 single-domain experts, perceive+judge prompts, per-specialist `thinking_level`/`media_resolution`/repetition; rule IDs resolve to `editing-protocol.md` | library | `SPECIALISTS`, `buildPrompt`, `specialistPromptFor`, `rosterFor` |
+| `perception-council.ts` | **PERCEIVE council = Conceptualize phase** — fans the panel over SOURCE footage, fuses to `<prefix>.conceptualization.md` | `tsx capabilities/perception/perception-council.ts --in PROXY [--transcript C.json] [--context "..."]` | `.perception.json` + `.conceptualization.md` |
+| `gemini-council.ts` | **10-specialist JUDGE panel** (registry-driven; grades the numbered editing-protocol rules; each cites `MM:SS.s` + frame-region; bare "looks great" rejected) | `tsx capabilities/perception/gemini-council.ts --in V [--context "..."] [--plan P] [--transcript C] [--only sound,cut] [--screencast] [--lang en\|da]` | `${PREFIX}.json` with `aggregateVerdict ship\|fix\|incomplete` |
 | `reference-analyze.ts` | **Mimic-this-video** deconstruction: objective signals (ASL, palette, LUFS) + **9-specialist** reference roster | `tsx capabilities/perception/reference-analyze.ts --in REF.mp4 [--signals-only]` | `style-spec.json` + `.md` |
 | `gemini-video-review.ts` | Gemini "eyes" — timestamped visual describe (`--mode describe`, scene or per-second granularity) or QA pass (`--mode qa`) | `tsx capabilities/perception/gemini-video-review.ts VIDEO [--mode describe\|qa] [--granularity scene\|second] [--transcript C.json] [--context "…"] [--lang en\|da]` | `<prefix>.json` + `.md` |
 | `cut-doctor.ts` | Whisper-grounded frame-accurate cut surgery (mid-word / mid-sentence / dangling-clause detection + surgical fix points) | `tsx capabilities/perception/cut-doctor.ts VIDEO [--transcript C.json] [--no-gemini]` | `<prefix>.cuts.json` + `.md` |
 
-**Council specialists:** `detail` (artifacts), `transition` (cut rhythm), `story` (B-roll↔VO match), `brand`
-(**reads YOUR `brand/brand.json`** — colors, tone, sell style + the 480 px safe-zone), `composition`, `avsync`, `color`. **+`screencast`**
+**Panel specialists (the SSOT roster, `specialists.ts`; perceive + judge):** `sound` (audio/bed/ducking/dead-air),
+`cut` (rhythm/ASL/continuity), `broll-concept` (the concept-visualization teach-test + b-roll↔VO match),
+`story` (hook/setup-payoff/CTA), `composition` (framing/crop-safety), `color` (grade/skin/composite match),
+`detail` (artifacts/typos), `performance` (delivery), `typography` (caption legibility/safe-zone), `brand`
+(**reads YOUR `brand/brand.json`** — colors, tone, sell style; judge-only). Each grades the numbered, verifier-tagged
+rules in `editing-protocol.md`. PERCEIVE runs at ingest (Conceptualize); JUDGE at delivery (`verify.ts`). **+`screencast`**
 sub-lens (cursor/secrets/chrome) auto-added on `--screencast` or a screencast/tutorial/demo context.
 **+`reel-segment`** sub-lens (hook·flow·value·trend reel-clip nomination) auto-added on
 `--reel-segments` or a "reels / best clips" context — feeds `export-premiere-xml`.

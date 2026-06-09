@@ -13,6 +13,7 @@ import * as path from 'node:path';
 import { run, runCapability } from '../_env/contract';
 
 export type Preset =
+  | 'preview-720p'
   | 'vertical-ad'
   | 'square-ad'
   | 'portrait-feed'
@@ -45,6 +46,15 @@ function conc(target: number): string {
 export function presetArgs(preset: Preset, compId: string, outName: string): { ext: string; args: string[] } {
   const base = (ext: string) => `out/${outName}.${ext}`;
   switch (preset) {
+    // ── preview-720p (render-rounds) ─────────────────────────────────────────
+    // The FAST first round the user reviews BEFORE any loudnorm/final. Downscaled HALF-res via
+    // `--scale=0.5` (1080×1920 → 540×960, 1920×1080 → 960×540) — speed-biased x264 + looser CRF.
+    // Why 0.5 and not 2/3: Remotion needs EVEN-integer output dims; 2/3 has no finite decimal, so
+    // `--scale=0.6667 × 1920 = 1280.064` is non-integer and Remotion rejects it (live-found, GATE
+    // VQ). 0.5 always halves even comp dims to even integers → renders every time. NOT for delivery
+    // — it skips loudnorm. Re-render ONLY this preset after each round of edits; promote on approval.
+    case 'preview-720p':
+      return { ext: 'mp4', args: [compId, base('mp4'), '--scale=0.5', '--codec=h264', '--crf=23', '--pixel-format=yuv420p', '--x264-preset=veryfast', conc(8), '--audio-bitrate=128k'] };
     case 'vertical-ad':
     case 'square-ad':
     case 'portrait-feed':

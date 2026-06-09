@@ -109,8 +109,8 @@ test('P2.4 decide: council technical-lens blocker → fix; taste-lens only → e
   const tech = decide([check({ ok: true, severity: 'blocker', stage: 'audio' })], council([{ id: 'detail', blockers: 2 }]));
   assertEqual(tech.verdict, 'fix', 'detail (technical) → fix');
   assertEqual(tech.stage_to_retry, 'motion', 'detail routes to motion');
-  const taste = decide([check({ ok: true, severity: 'blocker', stage: 'audio' })], council([{ id: 'transition', blockers: 1 }]));
-  assertEqual(taste.verdict, 'escalate', 'transition (taste) → human');
+  const taste = decide([check({ ok: true, severity: 'blocker', stage: 'audio' })], council([{ id: 'cut', blockers: 1 }]));
+  assertEqual(taste.verdict, 'escalate', 'cut (taste) → human');
   assertEqual(taste.stage_to_retry, null, 'no auto-stage on taste');
 });
 test('P2.4 decide: both axes broken → rework', () => {

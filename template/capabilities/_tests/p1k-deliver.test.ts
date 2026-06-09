@@ -81,6 +81,16 @@ test('P1K.6 presetArgs builds the right codec recipe per preset family', () => {
   assert(threw, 'unknown preset throws');
 });
 
+test('P1K.6b preview-720p is the fast downscaled first-round render (render-rounds)', () => {
+  const p = presetArgs('preview-720p', 'MyComp', 'proj/preview');
+  assertEqual(p.ext, 'mp4', 'preview mp4');
+  // --scale=0.5 (not 2/3): even-integer output dims always — 0.6667×1920=1280.064 is non-integer
+  // and Remotion rejects it (live-found at GATE VQ). 0.5 halves even comp dims to even integers.
+  assert(p.args.includes('--scale=0.5'), 'downscaled half-res — even-integer-safe so it always renders');
+  assert(!p.args.includes('--scale=0.6667'), 'never the non-integer 0.6667 scale (Remotion rejects 1280.064)');
+  assert(p.args.includes('--x264-preset=veryfast') && p.args.includes('--crf=23'), 'speed-biased recipe so the preview is fast');
+});
+
 test('P1K.7 presetArgs caps --concurrency at the machine cores (GATE V4 live-find)', () => {
   const cores = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
   for (const preset of ['vertical-ad', 'youtube-1080'] as const) {

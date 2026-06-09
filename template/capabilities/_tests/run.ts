@@ -45,6 +45,9 @@ async function main(): Promise<void> {
     './p1m-perception-cli.test',
     // P1N — screen-record capture CLIs: fail-fast envelope guards (no browser launched)
     './p1n-screen-record-cli.test',
+    // P1P (VQ.6.2) — perception-council (CONCEPTUALIZE) + gemini-council (JUDGE) CLI guards: missing
+    // --in / nonexistent file / missing key fail-fast BEFORE any upload; model-pin + offline knobs
+    './p1p-council-cli.test',
     // P2 — orchestration spine (manifest · provenance · split verifier · proxy · approval gate · budget guard)
     './p2-orchestrate.test',
     // P3 — Remotion template-ization (timelines + Zod props + calculateMetadata + motion lib + GSAP + variants + alpha)

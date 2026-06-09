@@ -20,7 +20,7 @@ import { assertSafeOutputPath, isShipPath, determinismInitScript } from '../scre
 import { validatePlan, planNavTargets } from '../screen-record/actions';
 import { buildScreencastChecks, type ScreencastProbe } from '../screen-record/verify-screencast';
 import { decide } from '../orchestrate/verify';
-import { wantsScreencastLens, SCREENCAST_SPECIALIST } from '../perception/gemini-council';
+import { wantsScreencastLens, SCREENCAST_SPECIALIST } from '../perception/specialists';
 
 // ── P1G.4 — the stitch: pure ffmpeg-argv recipes ───────────────────────────────
 
@@ -153,7 +153,7 @@ test('P1G.7 council screencast sub-lens is opt-in by flag or context', () => {
   assert(wantsScreencastLens(true, undefined), 'explicit flag includes it');
   assert(wantsScreencastLens(false, '9:16 product demo, English'), 'a demo context includes it');
   assert(!wantsScreencastLens(false, '9:16 Meta reel, English'), 'a generic reel does not');
-  assertIncludes(SCREENCAST_SPECIALIST.lens.toLowerCase(), 'cursor', 'the lens checks the cursor');
+  assertIncludes(SCREENCAST_SPECIALIST.laneFocus.toLowerCase(), 'cursor', 'the lane focus checks the cursor');
 });
 
 // ── P1G.9 render tier — REAL stitch through the deliverable encoder ──────────────
