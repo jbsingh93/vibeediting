@@ -9,18 +9,42 @@ import { applyRepetition, buildPrompt, rosterFor, specialistById } from '../perc
 import { REF_SPECIALISTS, refSpecialistPrompt, objectiveSignals } from '../perception/reference-analyze';
 import { visualCortexModel } from '../perception/gemini-client';
 
-test('P1E.1 the panel registry has the 10-specialist roster (SSOT)', () => {
-  assertEqual(SPECIALISTS.length, 10, 'ten specialists');
+test('P1E.1 the panel registry has the 17-specialist roster (SSOT — 10 craft lanes + the 7 MAX-OUT lenses)', () => {
+  assertEqual(SPECIALISTS.length, 17, 'seventeen specialists');
   const ids = SPECIALISTS.map((s) => s.id).sort();
-  assertEqual(ids.join(','), 'brand,broll-concept,color,composition,cut,detail,performance,sound,story,typography', 'expected roster');
+  assertEqual(
+    ids.join(','),
+    'brand,broll-concept,color,composition,continuity,cut,detail,hook,language,motion-design,ocr-text,performance,sound,story,sync,typography,viewer',
+    'expected roster',
+  );
 });
 
-test('P1E.1 perceive vs judge rosters (brand is judge-only; broll-concept runs both)', () => {
+test('P1E.1 perceive vs judge rosters (judge-only lenses stay out of the conceptualize panel)', () => {
   const perceive = rosterFor('perceive').map((s) => s.id);
   const judge = rosterFor('judge').map((s) => s.id);
-  assert(!perceive.includes('brand'), 'brand is judge-only — not in the conceptualize/perceive panel');
-  assert(perceive.includes('broll-concept') && judge.includes('broll-concept'), 'broll-concept runs in both modes');
-  assert(judge.length === 10, 'all ten judge');
+  for (const judgeOnly of ['brand', 'sync', 'ocr-text', 'language', 'motion-design', 'viewer']) {
+    assert(!perceive.includes(judgeOnly), `${judgeOnly} is judge-only — not in the conceptualize/perceive panel`);
+  }
+  for (const both of ['broll-concept', 'hook', 'continuity']) {
+    assert(perceive.includes(both) && judge.includes(both), `${both} runs in both modes`);
+  }
+  assertEqual(perceive.length, 11, 'eleven conceptualize at ingest');
+  assertEqual(judge.length, 17, 'all seventeen judge at delivery');
+});
+
+test('P1E.1 the MAX-OUT lenses carry their craft anchors (hook frame-1 · continuity both-sides · sync 45ms · viewer no-tech-duplication)', () => {
+  const hook = buildPrompt(specialistById('hook')!, 'judge', {});
+  assert(/0:00\.0|frame 1/i.test(hook) && /muted/i.test(hook), 'hook lens reads frame 1 + the muted-feed test');
+  const continuity = buildPrompt(specialistById('continuity')!, 'judge', {});
+  assert(/last.frame.before|both sides/i.test(continuity), 'continuity compares both sides of every cut');
+  const sync = buildPrompt(specialistById('sync')!, 'judge', {});
+  assert(/45 ?ms/.test(sync) && /plosive/i.test(sync), 'sync lens carries the 45ms threshold + plosive technique');
+  const viewer = buildPrompt(specialistById('viewer')!, 'judge', {});
+  assert(/may not duplicate technical lanes/i.test(viewer) && /muted/i.test(viewer), 'viewer is the gestalt lens, not a technician');
+  const ocr = buildPrompt(specialistById('ocr-text')!, 'judge', {});
+  assert(/character-by-character|æ\/ø\/å/i.test(ocr), 'ocr lens reads character-by-character incl. diacritics');
+  const language = buildPrompt(specialistById('language')!, 'judge', {});
+  assert(/idiom/i.test(language) && /register/i.test(language), 'language lens judges idiom + register');
 });
 
 test('P1E.1 a visual JUDGE prompt BANS the non-answer + forces quadrant scan + MM:SS + severity', () => {
@@ -61,12 +85,13 @@ test('P1E.1 the visual cortex is gemini-3.1-flash-lite (GAP-38), never 2.5', () 
   assertEqual(visualCortexModel(), 'gemini-3.1-flash-lite', 'flash-lite governing rule');
 });
 
-test('P1E.1 the editing-protocol SSOT exists and the rule IDs resolve', () => {
+test('P1E.1 the editing-protocol SSOT exists and the rule IDs resolve (incl. the MAX-OUT additions)', () => {
   const proto = fs.readFileSync(path.join(REPO_ROOT, '.claude', 'skills', 'video-editor', 'references', 'editing-protocol.md'), 'utf8');
-  for (const id of ['A1', 'C1', 'V4', 'N1', 'F4', 'K4', 'D4', 'P3', 'T5', 'B4']) {
+  for (const id of ['A1', 'A6', 'C1', 'C6', 'C7', 'V4', 'N1', 'N6', 'N7', 'F4', 'F5', 'K4', 'D4', 'D6', 'D7', 'P3', 'T5', 'T6', 'B4']) {
     assert(new RegExp(`\\b${id}\\b`).test(proto), `protocol defines rule ${id}`);
   }
   assert(/\[GEMINI\]/.test(proto) && /\[METER\]/.test(proto), 'verifier-routing tags present');
+  assert(/--votes/.test(proto), 'the ensemble knob is documented in the protocol');
 });
 
 test('P1E.4 reference-analyze has the 9-specialist deconstruction roster', () => {

@@ -12,10 +12,11 @@ import type { VerifyResult, Verdict } from './types';
 /**
  * Mirrors verify.ts SPECIALIST_STAGE `taste` flags — the lenses with no objective meter, so a blocker
  * escalates to a human "your call" instead of auto-routing to a fix stage. Keep in lockstep with the
- * 10-specialist registry (specialists.ts) + verify.ts: cut · broll-concept · story · performance, plus
- * the reel-segment sub-lens.
+ * specialist registry (specialists.ts) + verify.ts: cut · broll-concept · story · performance · hook ·
+ * viewer, plus the reel-segment sub-lens. (continuity/sync/ocr-text/language/motion-design are
+ * technical → fix, not taste.)
  */
-const TASTE_LENSES = new Set(['cut', 'broll-concept', 'story', 'performance', 'reel-segment']);
+const TASTE_LENSES = new Set(['cut', 'broll-concept', 'story', 'performance', 'hook', 'viewer', 'reel-segment']);
 
 export interface QaView {
   verdict: Verdict;

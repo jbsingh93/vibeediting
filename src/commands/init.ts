@@ -47,20 +47,28 @@ function isInteractive(opts: InitOptions): boolean {
   return Boolean(process.stdin.isTTY && process.stderr.isTTY && !opts.yes);
 }
 
-async function promptText(message: string, initial?: string): Promise<string> {
-  const { prompt } = (await import('enquirer')) as unknown as {
-    prompt: (q: object) => Promise<Record<string, string>>;
+// enquirer is CommonJS: under `await import()` its `prompt` lands on `.default`,
+// not as a detected named export — so resolve from either shape.
+async function getPrompt(): Promise<(q: object) => Promise<Record<string, unknown>>> {
+  const mod = (await import('enquirer')) as unknown as {
+    prompt?: (q: object) => Promise<Record<string, unknown>>;
+    default?: { prompt?: (q: object) => Promise<Record<string, unknown>> };
   };
+  const prompt = mod.prompt ?? mod.default?.prompt;
+  if (typeof prompt !== 'function') throw new Error('enquirer prompt unavailable');
+  return prompt;
+}
+
+async function promptText(message: string, initial?: string): Promise<string> {
+  const prompt = await getPrompt();
   const { value } = await prompt({ type: 'input', name: 'value', message, initial });
-  return (value ?? '').trim();
+  return (typeof value === 'string' ? value : '').trim();
 }
 
 async function promptConfirm(message: string, initial: boolean): Promise<boolean> {
-  const { prompt } = (await import('enquirer')) as unknown as {
-    prompt: (q: object) => Promise<Record<string, boolean>>;
-  };
+  const prompt = await getPrompt();
   const { value } = await prompt({ type: 'confirm', name: 'value', message, initial });
-  return value ?? initial;
+  return typeof value === 'boolean' ? value : initial;
 }
 
 /** Spawn a long-running command with live output in the project dir; resolves with exit code. */

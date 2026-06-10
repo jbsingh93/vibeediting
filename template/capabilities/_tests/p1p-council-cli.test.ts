@@ -12,7 +12,7 @@ import * as path from 'node:path';
 import { test, assert, assertEqual, assertIncludes } from './harness';
 import { ensureFixtures, FX_DIR, lastEnvelope, runTsxEnv } from './fixtures';
 import { REPO_ROOT } from '../_env/contract';
-import { resolutionEnum, thinkingEnum } from '../perception/gemini-client';
+import { parseJsonLoose, resolutionEnum, thinkingEnum } from '../perception/gemini-client';
 import { rosterFor, specialistById, wantsReelSegmentLens, wantsScreencastLens } from '../perception/specialists';
 
 const NO_GEMINI = { GEMINI_API_KEY: '', GOOGLE_API_KEY: '' };
@@ -73,6 +73,22 @@ test('P1P gemini-client thinking/resolution enums are pure + offline-safe', () =
   assert(resolutionEnum('low') !== undefined, 'low maps to a MediaResolution');
   assert(resolutionEnum('high') !== undefined, 'high maps to a MediaResolution');
   assertEqual(resolutionEnum('default'), undefined, 'default → undefined (API default resolution)');
+});
+
+test('P1P parseJsonLoose survives the real Gemini failure shapes (VQ.8 live-found)', () => {
+  // The live-found case: TWO complete objects back-to-back ("Unexpected non-whitespace character
+  // after JSON") — the first balanced object must win, not a slice spanning both.
+  const twin = parseJsonLoose('{"specialist":"performance","score":88}\n{"specialist":"performance","score":12}') as { score: number };
+  assertEqual(twin.score, 88, 'first balanced object wins over a duplicate trailing object');
+  // Trailing prose after a complete object.
+  const prose = parseJsonLoose('{"verdict":"ship"} Hope this helps!') as { verdict: string };
+  assertEqual(prose.verdict, 'ship', 'trailing prose tolerated');
+  // Braces inside string values must not confuse the balancer.
+  const braces = parseJsonLoose('noise {"note":"a {weird} value","ok":true} more noise') as { ok: boolean };
+  assertEqual(braces.ok, true, 'braces inside strings handled');
+  // Fenced output still parses.
+  const fenced = parseJsonLoose('```json\n{"a":1}\n```') as { a: number };
+  assertEqual(fenced.a, 1, 'fenced JSON stripped');
 });
 
 test('P1P roster-augmentation flags opt the sub-lenses in by flag OR context', () => {

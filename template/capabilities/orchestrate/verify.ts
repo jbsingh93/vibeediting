@@ -71,6 +71,14 @@ const SPECIALIST_STAGE: Record<string, { stage: StageName; taste: boolean }> = {
   cut: { stage: 'assemble', taste: true },
   'broll-concept': { stage: 'motion', taste: true },
   story: { stage: 'assemble', taste: true },
+  // VQ MAX-OUT lenses: hook/viewer are taste (escalate); continuity/sync/ocr/language/motion-design are fix facts.
+  hook: { stage: 'assemble', taste: true },
+  continuity: { stage: 'assemble', taste: false },
+  sync: { stage: 'assemble', taste: false },
+  'ocr-text': { stage: 'motion', taste: false },
+  language: { stage: 'motion', taste: false },
+  'motion-design': { stage: 'motion', taste: false },
+  viewer: { stage: 'assemble', taste: true },
   composition: { stage: 'motion', taste: false },
   color: { stage: 'color', taste: false },
   detail: { stage: 'motion', taste: false },
@@ -279,10 +287,18 @@ export function technicalGate(
 
 // ── the council EYES (subprocess; opt-in / opt-out) ─────────────────────────────
 
-function runCouncil(video: string, context: string | undefined, project: string, screencast: boolean): { eyes: CouncilSummary | null; warning?: string } {
+function runCouncil(
+  video: string, context: string | undefined, project: string, screencast: boolean,
+  opts: { plan?: string; transcript?: string; votes?: string } = {},
+): { eyes: CouncilSummary | null; warning?: string } {
   const args = ['--import', 'tsx', path.join(REPO_ROOT, 'capabilities', 'perception', 'gemini-council.ts'), '--in', video, '--project', project];
   if (context) args.push('--context', context);
   if (screencast) args.push('--screencast');
+  // Plumb the judge anchors through — plan-needing lanes (cut/broll/story/hook/brand/viewer) and
+  // transcript-needing lanes (broll/story/hook/sync/language) are starved without these.
+  if (opts.plan) args.push('--plan', opts.plan);
+  if (opts.transcript) args.push('--transcript', opts.transcript);
+  if (opts.votes) args.push('--votes', opts.votes);
   const r = run(process.execPath, args);
   try {
     const lines = r.stdout.trim().split('\n').filter(Boolean);
@@ -323,7 +339,10 @@ async function main(): Promise<void> {
     const wantEyes = process.argv.includes('--eyes') || (!process.argv.includes('--no-eyes') && hasEnv('GEMINI_API_KEY'));
     let eyes: CouncilSummary | null = null;
     if (wantEyes) {
-      const c = runCouncil(video, context, project, wantScreencast);
+      // --transcript defaults to --captions (the same word-timing JSON serves both the gap meter and the judge anchor).
+      const c = runCouncil(video, context, project, wantScreencast, {
+        plan: arg('plan'), transcript: arg('transcript') ?? captionsPath, votes: arg('votes'),
+      });
       eyes = c.eyes;
       if (c.warning) warnings.push(c.warning);
     } else {

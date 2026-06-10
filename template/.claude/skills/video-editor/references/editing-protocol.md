@@ -47,8 +47,9 @@ escalate to approval, they don't auto-resolve.
 | A3 | Dead air removed | no speech gap > 0.4 s | `[VAD]` |
 | A4 | SFX glue on events | text-entry → ~0.1 s pop; layout/transition → ~0.3 s swoosh | `[GEMINI]`+`[METER]` |
 | A5 | Delivery loudness | −14 LUFS integrated / −1 dBTP | `[METER]` |
+| A6 | Lip-sync locked | mouth matches voice within ~2 frames (≈66 ms @30); visible lead/lag ≳100 ms = blocker (viewers consciously notice ~45 ms) | `[GEMINI]` |
 
-## C — CUT ENGINEERING  (specialist: `cut`)
+## C — CUT ENGINEERING  (specialists: `cut` · `continuity`)
 | # | Rule | Threshold | Tag |
 |---|---|---|---|
 | C1 | No same-size cut on the same subject | shot-size change OR ≥15% zoom delta at the cut | `[GEMINI]` |
@@ -56,6 +57,8 @@ escalate to approval, they don't auto-resolve.
 | C3 | J/L-cut bridge at scene seams | audio leads/lags picture ~0.3 s | `[WHISPER]` |
 | C4 | No cut mid-word; no cut before a verbal setup pays off | sentence/word boundary respected | `[CUT-DOCTOR]` |
 | C5 | ASL in band + re-hook at the lull | ads/reels 1.5–3 s, tutorial 4–8 s; re-hook at 55–65% | `[METER]`+`[GEMINI]` |
+| C6 | No continuity break across a within-scene cut | position/gesture/prop/wardrobe/hair/lighting state matches both sides of the cut | `[GEMINI]` |
+| C7 | Screen-content state continuous in demos | scroll position / tab / data never teleports across a cut without a narrated reason | `[GEMINI]`+`[PLAN]` |
 
 ## V — VISUAL MEANING  (specialist: `broll-concept`)
 | # | Rule | Threshold | Tag |
@@ -67,7 +70,7 @@ escalate to approval, they don't auto-resolve.
 | V5 | Timing & recognizability | visual covers its own line, ends before the pivot, subject decodes < 0.5 s | `[GEMINI]` |
 | V6 | Consistency & credibility | one locked render style; mix is not all-generated (real > stock > generated) | `[GEMINI]` |
 
-## N — NARRATIVE  (specialist: `story`)
+## N — NARRATIVE  (specialists: `story` · `hook` · `viewer`)
 | # | Rule | Threshold | Tag |
 |---|---|---|---|
 | N1 | Hook creates an open loop | bold claim / question / pattern-interrupt in ≤ 3 s | `[GEMINI]` |
@@ -75,6 +78,8 @@ escalate to approval, they don't auto-resolve.
 | N3 | No verbal-setup→visual-only-payoff severance | hold A-roll until the line finishes | `[CUT-DOCTOR]`+`[GEMINI]` |
 | N4 | No unredeemed retention sag | re-hook the 55–65% lull | `[GEMINI]`+`[HUMAN]` |
 | N5 | CTA lands | present, single, lands hard (no soft "let me know what you think") | `[GEMINI]` |
+| N6 | The first visible frame works as a thumbnail | subject + motion/text at 0:00.0; never black / logo / slate / idle lead-in; motion or change within the first second | `[GEMINI]` |
+| N7 | A cold first watch reads clearly | no nameable confusion point; no attention drop without a re-hook; the core message survives ONE viewing (incl. muted) | `[GEMINI]`+`[HUMAN]` |
 
 ## F — FRAMING & HIERARCHY  (specialist: `composition`)
 | # | Rule | Threshold | Tag |
@@ -83,6 +88,7 @@ escalate to approval, they don't auto-resolve.
 | F2 | Thirds / headroom / lead-room respected | subject not dead-center unless deliberate | `[GEMINI]` |
 | F3 | Subject in focus & separated | — | `[GEMINI]` |
 | F4 | Nothing important crops at the edge in the target aspect | reframe-safe | `[GEMINI]`+`[METER]` |
+| F5 | Source display orientation honored | `ingest/probe` displayGeometry (rotation-aware) is the fact; a rotation-flagged vertical source is NEVER treated as landscape (no false reframe / centre-boxing) | `[METER]` |
 
 ## K — COLOR & EXPOSURE  (specialist: `color`)
 | # | Rule | Threshold | Tag |
@@ -92,14 +98,16 @@ escalate to approval, they don't auto-resolve.
 | K3 | Grade continuous across cuts | shot B matches shot A of the same scene | `[GEMINI]` |
 | K4 | Composites match the plate | black level / color / grain / light-wrap | `[GEMINI]` |
 
-## D — DEFECTS & ARTIFACTS  (specialist: `detail`)
+## D — DEFECTS & ARTIFACTS  (specialists: `detail` · `ocr-text` · `motion-design`)
 | # | Rule | Threshold | Tag |
 |---|---|---|---|
 | D1 | No AI warping / anatomy errors | extra fingers, melted edges | `[GEMINI]` |
 | D2 | No matte halos / fringing on composites | — | `[GEMINI]` |
 | D3 | No flicker / banding / compression artifacts | — | `[GEMINI]` |
-| D4 | No on-screen typos / logo errors | OCR every text element | `[GEMINI]` |
+| D4 | No on-screen typos / logo errors | OCR every text element character-by-character (incl. diacritics æ/ø/å) | `[GEMINI]` |
 | D5 | Animation eases | no pop-in / snap / mistimed reveal | `[GEMINI]` |
+| D6 | No placeholder/debug text; data exactly right | no Lorem/TODO/{var}/undefined; dates, prices, units, names & product casing correct for the locale | `[GEMINI]` |
+| D7 | Graphics layer correct | z-order right, nothing clips, every reveal lands on its spoken line (±~0.3 s), springs settle | `[GEMINI]` |
 
 ## P — PERFORMANCE  (specialist: `performance`)
 | # | Rule | Threshold | Tag |
@@ -108,7 +116,7 @@ escalate to approval, they don't auto-resolve.
 | P2 | Eye contact held at the key lines | — | `[GEMINI]` |
 | P3 | Weakest delivery moments are cut or covered | — | `[GEMINI]`+`[HUMAN]` |
 
-## T — TYPOGRAPHY & CAPTIONS  (specialist: `typography`)
+## T — TYPOGRAPHY & CAPTIONS  (specialists: `typography` · `language`)
 | # | Rule | Threshold | Tag |
 |---|---|---|---|
 | T1 | Text legible at phone scale | weight/stroke/contrast/size | `[GEMINI]` |
@@ -116,6 +124,7 @@ escalate to approval, they don't auto-resolve.
 | T3 | Emphasis word colored & synced to the stressed word | brand accent | `[GEMINI]`+`[WHISPER]` |
 | T4 | Font consistent; no overflow/clipping/bad breaks | — | `[GEMINI]` |
 | T5 | Captions/CTA out of the 9:16 safe zone | not in the bottom 480 px | `[METER]`+`[GEMINI]` |
+| T6 | Copy native-clean in the target language | grammar + idiom + register + locale conventions; captions word-faithful to the speech | `[GEMINI]` |
 
 ## B — BRAND & FORMAT  (specialist: `brand`)
 | # | Rule | Threshold | Tag |
@@ -131,9 +140,11 @@ escalate to approval, they don't auto-resolve.
 ## UNIVERSAL CORE vs STYLE PACKS
 
 **Universal core** — these hold for EVERY video regardless of style; never overridden:
-`A5` (−14 LUFS), `C4` (no mid-word cut), `V1`+`N1` (hook fast), `N5` (CTA lands), `F4` (no edge crop),
-`T1` (legible), `T5` (safe zone), `D4` (no typos), `D1–D3` (no artifacts), `K1` (exposure not destroyed),
-`B4` (on-tone).
+`A5` (−14 LUFS), `A6` (lip-sync locked), `C4` (no mid-word cut), `C6` (no continuity break),
+`V1`+`N1` (hook fast), `N5` (CTA lands), `N6` (frame-1 thumbnail test), `F4` (no edge crop),
+`F5` (source orientation honored), `T1` (legible), `T5` (safe zone), `T6` (copy native-clean),
+`D4` (no typos), `D6` (no placeholder/data errors), `D1–D3` (no artifacts),
+`K1` (exposure not destroyed), `B4` (on-tone).
 
 **Style packs** — a named style overrides specific *thresholds* (not the core). The editor picks the
 pack from the brief / `named-style-anchors.md`; the panel is told which pack is active via the intent
@@ -159,3 +170,13 @@ numbered rule in the right lane** (with a threshold + verifier tag) or, if it's 
 few-shot calibration anchor** for that specialist (`specialists.ts`). This is the
 `feedback_round6_audit` method: failures crystallize into rules so the same defect never ships twice.
 Append new rules here; bump the specialist's `inspect` checklist and `calibration` in lockstep.
+
+> Worked example: **F5** exists because a live walk shipped a phone-vertical clip (stored 1920×1080 +
+> a 90° rotation flag) mis-treated as landscape — the user caught it, the probe meter was made
+> rotation-aware, and the failure became a `[METER]` rule. That is this loop working as designed.
+
+**The ensemble knob (anti-leniency):** `gemini-council --votes N` (1–5) runs every specialist N
+independent times and merges recall-first (findings UNION, worst verdict, min score). Use
+`--votes 2`+ at the delivery gate on anything that matters — flash-lite's failure mode is MISSING
+real defects, and independent votes are the structural counter. `verify.ts` forwards `--votes`
+(and `--plan` / `--transcript`, defaulting transcript to `--captions`).

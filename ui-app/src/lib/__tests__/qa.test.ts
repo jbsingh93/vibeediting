@@ -97,8 +97,8 @@ describe('qaView over decide() branches', () => {
 });
 
 describe('taste lenses', () => {
-  it('matches verify.ts SPECIALIST_STAGE (cut/broll-concept/story/performance + reel-segment are taste; the rest technical)', () => {
-    for (const t of ['cut', 'broll-concept', 'story', 'performance', 'reel-segment']) expect(isTasteLens(t)).toBe(true);
-    for (const t of ['sound', 'composition', 'color', 'detail', 'typography', 'brand', 'screencast']) expect(isTasteLens(t)).toBe(false);
+  it('matches verify.ts SPECIALIST_STAGE (cut/broll-concept/story/performance/hook/viewer + reel-segment are taste; the rest technical)', () => {
+    for (const t of ['cut', 'broll-concept', 'story', 'performance', 'hook', 'viewer', 'reel-segment']) expect(isTasteLens(t)).toBe(true);
+    for (const t of ['sound', 'composition', 'color', 'detail', 'typography', 'brand', 'screencast', 'continuity', 'sync', 'ocr-text', 'language', 'motion-design']) expect(isTasteLens(t)).toBe(false);
   });
 });

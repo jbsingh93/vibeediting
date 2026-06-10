@@ -75,7 +75,29 @@ export function thinkingEnum(t: 'minimal' | 'low' | 'medium' | 'high' | undefine
   }
 }
 
-/** Best-effort JSON parse — strips ``` fences / surrounding prose. */
+/** Extract the FIRST balanced top-level {...} (string-aware) — survives a model emitting two objects
+ *  back-to-back or trailing prose after a complete object (live-found at VQ.8: "Unexpected
+ *  non-whitespace character after JSON" from `slice(firstBrace, lastBrace)` spanning both objects). */
+function firstBalancedObject(t: string): string | null {
+  const start = t.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < t.length; i++) {
+    const c = t[i];
+    if (esc) { esc = false; continue; }
+    if (inStr) {
+      if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return t.slice(start, i + 1); }
+  }
+  return null;
+}
+
+/** Best-effort JSON parse — strips ``` fences / surrounding prose / duplicate trailing objects. */
 export function parseJsonLoose(text: string): unknown {
   const t = text.trim();
   try {
@@ -87,6 +109,14 @@ export function parseJsonLoose(text: string): unknown {
   if (fence) {
     try {
       return JSON.parse(fence[1].trim());
+    } catch {
+      /* keep trying */
+    }
+  }
+  const balanced = firstBalancedObject(t);
+  if (balanced) {
+    try {
+      return JSON.parse(balanced);
     } catch {
       /* keep trying */
     }

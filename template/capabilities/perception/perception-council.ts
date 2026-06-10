@@ -82,7 +82,7 @@ function arr(o: Record<string, unknown> | undefined, key: string): Record<string
 }
 
 /** Fuse the per-specialist maps into a plan-ready conceptualization markdown. */
-function renderConceptualization(results: PerceiveResult[], videoPath: string, model: string): { md: string; counts: { conceptBeats: number; opportunities: number; problems: number } } {
+function renderConceptualization(results: PerceiveResult[], videoPath: string, model: string): { md: string; counts: { conceptBeats: number; hookCandidates: number; opportunities: number; problems: number } } {
   const L: string[] = [];
   L.push(`# Conceptualization — ${path.basename(videoPath)}`);
   L.push('');
@@ -113,6 +113,34 @@ function renderConceptualization(results: PerceiveResult[], videoPath: string, m
     L.push('| Time | Line | Idea shape | Suggested visual | What it teaches | Concrete subject |');
     L.push('|---|---|---|---|---|---|');
     for (const r of conceptRows) L.push(`| ${cell(r.start)}–${cell(r.end)} | ${cell(r.vo)} | ${cell(r.ideaShape)} | ${cell(r.suggestedPrimitive)} | ${cell(r.teachTest)} | ${cell(r.concreteSubject)} |`);
+    L.push('');
+  }
+
+  // Hook candidates (the first-3-seconds forensic lens) — the scroll-stop moments the plan opens with.
+  const hook = byId(results, 'hook');
+  const hookRows = arr(hook, 'hookCandidates');
+  if (hook && (hookRows.length || hook.firstFrameRead)) {
+    L.push('## Hook candidates (scroll-stop moments — open with one of these)');
+    L.push('');
+    if (hook.firstFrameRead) L.push(`**The actual open today:** frame 1 = ${cell(hook.firstFrameRead)}${hook.firstWords ? ` · first words: “${cell(hook.firstWords)}”` : ''}${hook.firstMotionAt ? ` · first motion at ${cell(hook.firstMotionAt)}` : ''}`);
+    if (hookRows.length) {
+      L.push('');
+      L.push('| Time | Device | Line | Visual | Muted carry (text) | Strength | Why |');
+      L.push('|---|---|---|---|---|---|---|');
+      for (const r of [...hookRows].sort((a, b) => Number(b.strength ?? 0) - Number(a.strength ?? 0))) {
+        L.push(`| ${cell(r.start)}–${cell(r.end)} | ${cell(r.device)} | ${cell(r.line)} | ${cell(r.visual)} | ${cell(r.mutedCarry)} | ${cell(r.strength)}/10 | ${cell(r.why)} |`);
+      }
+    }
+    L.push('');
+  }
+
+  // Intercut-safety map (the continuity lens) — which windows can cut together cleanly.
+  const continuity = byId(results, 'continuity');
+  const stateRows = arr(continuity, 'timeline').filter((r) => r.hazard || r.intercutSafeWith);
+  if (stateRows.length) {
+    L.push('## Intercut map (continuity — what cuts together cleanly)');
+    L.push('');
+    for (const r of stateRows) L.push(`- **${cell(r.start)}–${cell(r.end)}** ${r.intercutSafeWith ? `intercuts with ${cell(r.intercutSafeWith)}` : ''}${r.hazard ? ` ⚠ ${cell(r.hazard)}` : ''}`);
     L.push('');
   }
 
@@ -168,7 +196,7 @@ function renderConceptualization(results: PerceiveResult[], videoPath: string, m
     L.push('');
   }
 
-  return { md: L.join('\n'), counts: { conceptBeats: conceptRows.length, opportunities: opps.length, problems: problems.length } };
+  return { md: L.join('\n'), counts: { conceptBeats: conceptRows.length, hookCandidates: hookRows.length, opportunities: opps.length, problems: problems.length } };
 }
 
 async function main(): Promise<void> {

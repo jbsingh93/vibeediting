@@ -22,6 +22,7 @@
  *   tsx capabilities/perception/gemini-council.ts --in VIDEO [--context "9:16 Meta Reel, 30s"] [--out PREFIX]
  *       [--plan PLAN.md] [--transcript CAPS.json] [--fps N] [--resolution low|default|high]
  *       [--only sound,cut] [--lang en|da] [--project NAME] [--screencast] [--reel-segments]
+ *       [--votes N]   (1–5; ensemble anti-leniency: findings UNION, worst verdict, min score)
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -117,20 +118,39 @@ async function main(): Promise<void> {
     const model = visualCortexModel();
     const file = await uploadAndWait(ai, videoPath);
 
+    // --votes N (default 1): the ENSEMBLE anti-leniency knob. Each specialist runs N independent
+    // times; the merged result is recall-maximizing — findings are the UNION (deduped by time+text
+    // prefix), the verdict is the WORST vote, the score the MINIMUM. flash-lite's failure mode is
+    // missing real defects out of leniency, so a defect surfaced by ANY vote survives; a defect
+    // invented by one vote is exactly what the evidence-or-invalid rule + the verifier routing absorb.
+    const votes = Math.max(1, Math.min(5, parseInt(arg('votes') ?? '1', 10) || 1));
+    const VERDICT_RANK: Record<string, number> = { ship: 0, 'fix-first': 1, fix: 1, rework: 2 };
+    const findingKey = (f: SpecialistResult['findings'][number]): string =>
+      `${f.time ?? ''}|${String(f.observation ?? f.problem ?? '').toLowerCase().slice(0, 48)}`;
+
     const results: SpecialistResult[] = [];
     try {
       await Promise.all(
         active.map(async (s) => {
           const samp = s.sampling.judge;
-          try {
-            const data = (await askJson(ai, model, file, specialistPromptFor(s, 'judge', ctx), {
+          const askOnce = async (): Promise<{ verdict?: string; score?: number; findings?: SpecialistResult['findings'] }> =>
+            (await askJson(ai, model, file, specialistPromptFor(s, 'judge', ctx), {
               fps: fpsOverride ?? samp?.fps ?? 3,
               resolution: resOverride ?? samp?.resolution ?? 'default',
               thinking: samp?.thinking ?? 'medium',
             })) as { verdict?: string; score?: number; findings?: SpecialistResult['findings'] };
-            const findings = Array.isArray(data.findings) ? data.findings : [];
+          try {
+            const ballots = await Promise.all(Array.from({ length: votes }, () => askOnce()));
+            const merged = new Map<string, SpecialistResult['findings'][number]>();
+            for (const b of ballots) for (const f of (Array.isArray(b.findings) ? b.findings : [])) {
+              const k = findingKey(f);
+              if (!merged.has(k)) merged.set(k, f);
+            }
+            const findings = [...merged.values()];
+            const verdict = ballots.map((b) => b.verdict ?? '?').sort((a, b) => (VERDICT_RANK[b] ?? 0) - (VERDICT_RANK[a] ?? 0))[0];
+            const scores = ballots.map((b) => b.score).filter((n): n is number => typeof n === 'number');
             results.push({
-              specialist: s.id, title: s.title, verdict: data.verdict ?? '?', score: data.score,
+              specialist: s.id, title: s.title, verdict: verdict ?? '?', score: scores.length ? Math.min(...scores) : undefined,
               blockers: countSeverity(findings, 'blocker'), majors: countSeverity(findings, 'major'), findings,
             });
           } catch (e) {
@@ -153,7 +173,7 @@ async function main(): Promise<void> {
     return {
       outputs: [path.resolve(`${outPrefix}.json`)],
       metrics: {
-        aggregateVerdict, totalBlockers, totalMajors,
+        aggregateVerdict, totalBlockers, totalMajors, votes,
         specialists: results.map((r) => ({ id: r.specialist, verdict: r.verdict, score: r.score, blockers: r.blockers, majors: r.majors })),
       },
       project,
