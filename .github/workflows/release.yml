@@ -1,10 +1,12 @@
 name: Release
 
-# DISARMED until phase V7 (release engineering): changesets attempts an npm publish
-# whenever the local version is missing from the registry, and we must not publish
-# pre-alpha builds. At V7.3 — after OIDC trusted publishing is configured on npm —
-# restore the `push: branches: [main]` trigger.
+# ARMED (V7.3): OIDC trusted publishing is configured on npm for jbsingh93/vibeediting
+# via this workflow file. On push to main, changesets/action opens/updates a "Version
+# Packages" PR when changesets are present; merging that PR triggers the actual publish.
+# No changesets present → the action is a no-op (no PR, no publish).
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
