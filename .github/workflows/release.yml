@@ -32,6 +32,11 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
 
+      # Guarantee npm >= 11.5.1 for OIDC trusted publishing, regardless of which
+      # npm the installed Node 24.x happens to bundle (24.4.x ships 11.4.2, < 11.5.1).
+      - name: Ensure npm supports trusted publishing
+        run: npm install -g npm@latest
+
       - name: Install
         run: npm ci
 
