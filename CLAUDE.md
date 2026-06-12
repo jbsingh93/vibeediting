@@ -48,6 +48,33 @@ npm run lint         # eslint flat config
    headless render engine in the scaffolded project.
 7. Tests travel with code; a phase isn't done until its gate (doc 10) passes.
 
+## Releasing (manual — no CI)
+
+The package is live on npm (`vibeediting`, first published at 0.1.0). Releases are done
+**manually from a maintainer's machine** — GitHub Actions is intentionally NOT in the loop:
+
+```bash
+npm version patch        # or minor / major — bumps package.json + creates the git tag
+npm publish              # prepublishOnly runs build + ui:build, then publishes
+git push --follow-tags   # push the version commit + tag
+```
+
+- `npm login` first if needed; `npm publish` will prompt for a 2FA OTP.
+- `publishConfig` is `{ "access": "public" }` only — **no `provenance` key**. Provenance
+  needs a CI/OIDC environment, so it stays off for local publishes; do not re-add it for
+  manual releases (it makes `npm publish` fail outside CI).
+- Before publishing, run the full gate: `npm run typecheck && npm run lint && npm run
+  test:run`, plus the live user-simulation smoke below. The `files` whitelist (hard rule 4)
+  is the publish boundary — sanity-check `npm pack --dry-run` for stray files/secrets.
+
+**Hint — re-arming automated CI later (if it becomes relevant):** an OIDC Trusted Publisher
+is already configured on npmjs.com (publisher GitHub Actions, repo `jbsingh93/vibeediting`,
+workflow `release.yml`, action `npm publish`), and `.github/workflows/release.yml` holds a
+ready changesets-based pipeline — currently **DISARMED** (`workflow_dispatch` only). To go
+automated, restore its `push: branches: [main]` trigger and make sure GitHub Actions billing
+is active; then releases flow through `npm run changeset` → a "Version Packages" PR → merge →
+auto-publish with provenance. No tokens or other changes required.
+
 ## Verification — live user-simulation smoke is mandatory
 
 Typecheck + build + unit tests are necessary but **not sufficient**. Before closing any phase-gate
