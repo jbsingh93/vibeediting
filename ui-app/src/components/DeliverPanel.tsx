@@ -115,7 +115,7 @@ export function DeliverPanel({ projectId, defaultComp }: { projectId: string; de
       <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, cursor: 'pointer' }}>
         <input type="checkbox" checked={loudnorm} onChange={(e) => setLoudnorm(e.target.checked)} data-testid="loudnorm-toggle" />
         loudnorm master <span className="mono" style={{ color: 'var(--muted)' }}>−14 LUFS / −1 dBTP</span>
-        <span style={{ color: 'var(--muted)', fontSize: 12 }}>→ test-video/{projectId}/…-loudnorm.mp4</span>
+        <span style={{ color: 'var(--muted)', fontSize: 12 }}>→ deliver/{projectId}/…-loudnorm.mp4</span>
       </label>
 
       {hasProps && (
