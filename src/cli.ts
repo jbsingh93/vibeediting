@@ -8,6 +8,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { VERSION, PRODUCT_DESCRIPTION } from './version.js';
 import { VibeError, CancelledError } from './core/errors.js';
+import { notifyUpdate } from './core/update-check.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerUiCommand } from './commands/ui.js';
 import { registerDoctorCommand } from './commands/doctor.js';
@@ -64,6 +65,12 @@ export async function runCli(argv: string[]): Promise<void> {
   // `vibe` with no arguments = `vibe ui` (D16: the UI is the product surface).
   const args = argv.slice(2);
   const effectiveArgv = args.length === 0 ? [...argv, 'ui'] : argv;
+
+  // Non-blocking "update available" notice (skipped for machine/quiet/version/help paths).
+  const quietPath = args.some((a) =>
+    ['--json', '--quiet', '-v', '--version', '-h', '--help'].includes(a),
+  );
+  if (!quietPath) notifyUpdate();
 
   try {
     await program.parseAsync(effectiveArgv);
