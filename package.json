@@ -1,6 +1,6 @@
 {
   "name": "vibeediting",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "JBS Vibe Editing — AI video editing in your browser, driven by your own Claude Code (or Codex CLI) and a battle-tested local media engine. Source-available, free for non-commercial use.",
   "type": "module",
   "bin": {
