@@ -47,6 +47,15 @@ npm run lint         # eslint flat config
 6. **No Remotion Studio anywhere** — the in-house editor is the product surface; Remotion is the
    headless render engine in the scaffolded project.
 7. Tests travel with code; a phase isn't done until its gate (doc 10) passes.
+8. **A fresh scaffold must `npm run lint` (tsc) clean with zero extra installs.** On-demand deps
+   (e.g. `playwright` for screen-record, GAP-67) are imported dynamically AND excluded in the
+   template `tsconfig.json` — but `tsc` still type-checks any excluded file reached via an `import`
+   (a test importing `record-session.ts` re-surfaced `TS2307: Cannot find module 'playwright'`).
+   So every optional/on-demand module needs an ambient `declare module '<pkg>';` shim in the
+   template (`template/capabilities/screen-record/playwright.d.ts`) so the scaffold type-checks
+   before the optional install; the real types take over once the user installs it. The package's
+   own `npm run typecheck` compiles `src/` only and will NOT catch this — the `scaffold e2e` CI job
+   (and a real `vibe init` → `npm run lint`) is the gate.
 
 ## Releasing (automated CI — changesets + OIDC)
 
