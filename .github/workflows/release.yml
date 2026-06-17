@@ -1,12 +1,15 @@
 name: Release
 
-# DISARMED — releases are done MANUALLY (`npm version` + `npm publish` from a
-# maintainer's machine), so this workflow only runs on demand via the Actions tab.
-# The OIDC Trusted Publisher (jbsingh93/vibeediting → release.yml, action `npm publish`)
-# stays configured on npmjs.com and is harmless while unused. To switch back to
-# automated CI releases later, restore the `push: branches: [main]` trigger below and
-# ensure GitHub Actions billing is active — nothing else needs to change.
+# ARMED — automated releases via changesets + npm OIDC trusted publishing.
+# Flow: push a changeset to `main` → this workflow opens/updates a "Version Packages"
+# PR (no publish). Merge that PR → this workflow runs `changeset publish`, which
+# publishes to npm with provenance. No NPM_TOKEN needed — the OIDC Trusted Publisher
+# (jbsingh93/vibeediting → release.yml, action `npm publish`) on npmjs.com verifies the
+# workflow identity via the `id-token: write` permission below.
+# Requires GitHub Actions billing to be active on the account.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:

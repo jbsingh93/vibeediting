@@ -1,0 +1,8 @@
+---
+"vibeediting": patch
+---
+
+Sync the committed `ui-dist/` cockpit client with the artifact shipped in 0.1.0, and switch releases to automated CI publishing.
+
+- Re-armed `.github/workflows/release.yml` (changesets + npm OIDC trusted publishing) so releases flow through a "Version Packages" PR instead of manual `npm publish`.
+- Enabled `publishConfig.provenance` — published builds now carry a verified provenance attestation (only possible from CI/OIDC).
