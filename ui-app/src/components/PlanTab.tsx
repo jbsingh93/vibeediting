@@ -18,9 +18,14 @@ import { EmptyState } from './EmptyState';
 /** Paid-generation providers whose mention (without a cost line) warrants the soft warning chip. */
 const PAID_PROVIDERS = ['elevenlabs', 'veo', 'runway', 'seedance', 'gpt-image'];
 
-/** First `Estimated cost: $X.XX …` amount found in the notes (case-insensitive), else null. */
+/**
+ * First `Estimated cost: $X.XX …` amount found in the notes (case-insensitive), else null.
+ * Tolerates an approximator before the `$` — agents routinely write "~$0.10" / "≈$5" / "about $20"
+ * for estimates; without this the cost chip silently vanished and the contradictory
+ * "mentions paid generation but no cost line" warning fired instead (live-found, /qa 2026-06-17).
+ */
 export function estimatedCost(notes: string): string | null {
-  const m = notes.match(/estimated\s+cost:\s*(\$\s*[\d,]+(?:\.\d+)?)/i);
+  const m = notes.match(/estimated\s+cost:\s*(?:~|≈|approx\.?|about\s+)?\s*(\$\s*[\d,]+(?:\.\d+)?)/i);
   return m && m[1] ? m[1].replace(/\s+/g, '') : null;
 }
 

@@ -20,6 +20,15 @@ describe('estimatedCost', () => {
   it('handles thousands separators and whole dollars', () => {
     expect(estimatedCost('Estimated cost: $1,200')).toBe('$1,200');
   });
+  // Regression: ISSUE-001 — agents write "~$0.10" / "≈$5" / "about $20" for estimates; the cost
+  // chip used to vanish (and the false "no cost line" warning fired). Found by /qa on 2026-06-17.
+  // Report: DEV-DOCS/notes/live-qa/2026-06-17-cockpit.md
+  it('tolerates an approximator before the $ (~ / ≈ / about / approx)', () => {
+    expect(estimatedCost('Estimated cost: ~$0.10 (ElevenLabs).')).toBe('$0.10');
+    expect(estimatedCost('Estimated cost: ≈ $5')).toBe('$5');
+    expect(estimatedCost('Estimated cost: about $20 for the render')).toBe('$20');
+    expect(estimatedCost('Estimated cost: approx. $1,200')).toBe('$1,200');
+  });
   it('null when there is no cost line', () => {
     expect(estimatedCost('A plan with no money mentioned at all.')).toBeNull();
   });
